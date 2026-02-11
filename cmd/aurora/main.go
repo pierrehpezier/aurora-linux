@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nicholasgasior/aurora-linux/cmd/aurora-linux/agent"
+	"github.com/nicholasgasior/aurora-linux/cmd/aurora/agent"
 	"github.com/spf13/cobra"
 )
 
@@ -15,13 +15,13 @@ func main() {
 	params.Version = version
 
 	rootCmd := &cobra.Command{
-		Use:   "aurora-linux",
+		Use:   "aurora",
 		Short: "Aurora Linux EDR Agent",
 		Long: `Aurora Linux is a standalone Linux EDR agent that collects system
 telemetry via eBPF, normalizes events into a Sigma-compatible schema, and
 matches them against Sigma rules in real time.`,
-		Example: `  aurora-linux --rules /opt/sigma/rules/linux --json
-  aurora-linux --rules /opt/sigma/rules/linux --rules /opt/custom/sigma --verbose`,
+		Example: `  aurora --rules /opt/sigma/rules/linux --json
+  aurora --rules /opt/sigma/rules/linux --rules /opt/custom/sigma --verbose`,
 		Version:       version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,

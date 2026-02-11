@@ -1,0 +1,50 @@
+# Example rsyslog forwarding config for Aurora logs.
+# Copy to /etc/rsyslog.d/30-aurora.conf and adjust destination/TLS settings.
+# Then restart rsyslog: systemctl restart rsyslog
+
+module(load="imfile")
+
+# Read Aurora JSON log file.
+input(
+  type="imfile"
+  File="/var/log/aurora-linux/aurora.log"
+  Tag="aurora"
+  Severity="info"
+  Facility="local6"
+  PersistStateInterval="100"
+)
+
+# Optional: parse raw file lines as JSON (if your rsyslog build supports it).
+# template(name="AuroraJsonRaw" type="string" string="%msg%\n")
+
+# Remote receiver destination (TCP + RFC5424).
+# Replace host/port with your SIEM/syslog endpoint.
+action(
+  type="omfwd"
+  target="siem.example.internal"
+  port="6514"
+  protocol="tcp"
+  Template="RSYSLOG_SyslogProtocol23Format"
+
+  # Queueing/retry options.
+  queue.type="LinkedList"
+  queue.filename="aurora_fwd"
+  action.resumeRetryCount="-1"
+)
+
+# TLS example (recommended for untrusted networks):
+# global(
+#   DefaultNetstreamDriver="gtls"
+#   DefaultNetstreamDriverCAFile="/etc/ssl/certs/ca-certificates.crt"
+# )
+# action(
+#   type="omfwd"
+#   target="siem.example.internal"
+#   port="6514"
+#   protocol="tcp"
+#   StreamDriver="gtls"
+#   StreamDriverMode="1"
+#   StreamDriverAuthMode="x509/name"
+#   StreamDriverPermittedPeers="siem.example.internal"
+#   Template="RSYSLOG_SyslogProtocol23Format"
+# )

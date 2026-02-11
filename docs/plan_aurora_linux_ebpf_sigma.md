@@ -81,7 +81,7 @@ version.
 ```
 aurora-linux/
 ├── cmd/
-│   └── aurora-linux/
+│   └── aurora/
 │       ├── main.go                  CLI entry point (cobra), service lifecycle
 │       └── agent/
 │           ├── agent.go             Agent init/run: create distributor, register providers + consumers
@@ -125,7 +125,7 @@ aurora-linux/
 │   │   └── ebpf-log-source-mappings.yml   Sigma category → service + conditions mapping
 │   └── sigma-rules/                       Bundled Sigma rule subset (optional)
 ├── deploy/
-│   └── aurora-linux.service               systemd unit file
+│   └── aurora.service                     systemd unit file
 ├── docs/
 │   ├── plan_aurora_linux_ebpf_sigma.md    This document
 │   └── plan_linux_ebpf_provider.md        Earlier draft (reference)
@@ -1692,7 +1692,7 @@ for a dedicated `aurora` user.
 ### 6.5 systemd Service
 
 ```ini
-# deploy/aurora-linux.service
+# deploy/aurora.service
 
 [Unit]
 Description=Aurora Linux EDR Agent
@@ -1702,7 +1702,7 @@ After=network.target
 Type=simple
 Environment=AURORA_RULES_DIR=/opt/aurora-linux/sigma-rules/rules/linux
 Environment=AURORA_LOG_FILE=/var/log/aurora-linux/aurora.log
-EnvironmentFile=-/opt/aurora-linux/config/aurora-linux.env
+EnvironmentFile=-/opt/aurora-linux/config/aurora.env
 ExecStart=/opt/aurora-linux/aurora-linux \
     --rules ${AURORA_RULES_DIR} \
     --logfile ${AURORA_LOG_FILE} \
@@ -1909,12 +1909,12 @@ network_connection Sigma rules (crypto mining, ngrok, localtonet).
 | 9 | Implement enricher + correlator | `lib/distributor/enricher.go`, `lib/enrichment/correlator.go` | LRU parent cache, ManipulatorFunc registry |
 | 10 | Implement Sigma consumer | `lib/consumer/sigma/sigmaconsumer.go` | Load rules, wrap events, scan, report matches |
 | 11 | Create log source YAML configs | `resources/log-sources/` | `ebpf-log-sources.yml` + `ebpf-log-source-mappings.yml` |
-| 12 | Implement CLI with cobra | `cmd/aurora-linux/main.go` | Flags: `--rules`, `--logfile`, `--json`, `--ringbuf-size` |
+| 12 | Implement CLI with cobra | `cmd/aurora/main.go` | Flags: `--rules`, `--logfile`, `--json`, `--ringbuf-size` |
 | 13 | Implement JSON + text log formatters | `lib/logging/` | Logrus formatters for JSON and human-readable text output |
 | 14 | Write unit tests for field mapping | `lib/provider/ebpf/fieldmap_test.go` | See Section 5.1 |
 | 15 | Write integration tests | `lib/provider/ebpf/integration_test.go` | See Section 5.2 |
 | 16 | Build replay provider | `lib/provider/replay/` | For CI without BPF |
-| 17 | Create systemd unit file | `deploy/aurora-linux.service` | See Section 4.5 |
+| 17 | Create systemd unit file | `deploy/aurora.service` | See Section 4.5 |
 | 18 | Create test fixture JSONL | `testdata/recorded_exec_events.jsonl` | Record from integration test VM |
 
 ## Appendix B: Event ID Assignments

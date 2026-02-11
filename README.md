@@ -1,3 +1,5 @@
+![Aurora Linux Logo](docs/aurora-logo.png)
+
 # Aurora Linux
 
 Aurora Linux is a real-time Linux EDR agent.
@@ -58,14 +60,17 @@ bpftool btf dump file /sys/kernel/btf/vmlinux format c \
 go generate ./lib/provider/ebpf/
 
 # 3. Build the binary
-go build -o aurora-linux ./cmd/aurora-linux/
+go build -o aurora ./cmd/aurora/
+
+# 4. Build the update utility (optional)
+go build -o aurora-util ./cmd/aurora-util/
 ```
 
 ### Run
 
 ```bash
 # Point at the Linux Sigma root directory (subfolders are loaded recursively)
-sudo ./aurora-linux --rules /path/to/sigma/rules/linux --json
+sudo ./aurora --rules /path/to/sigma/rules/linux --json
 ```
 
 `--rules` is required. Aurora validates rule directories at startup and exits
@@ -75,11 +80,81 @@ unmapped rules are skipped; startup only fails when zero rules are loadable.
 ### Deploy as a Service
 
 ```bash
-sudo cp aurora-linux /opt/aurora-linux/
-sudo cp deploy/aurora-linux.service /etc/systemd/system/
+sudo cp aurora /opt/aurora-linux/
+sudo cp deploy/aurora.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now aurora-linux
+sudo systemctl enable --now aurora
 ```
+
+### Automated Install (Recommended)
+
+```bash
+# From a source checkout:
+sudo ./scripts/install-service.sh \
+  --aurora-binary ./aurora \
+  --aurora-util-binary ./aurora-util
+
+# From an extracted release package under /opt/aurora-linux:
+sudo /opt/aurora-linux/scripts/install-service.sh
+```
+
+Supported distro families:
+- Ubuntu/Debian
+- RHEL/Fedora
+- Arch
+
+The installer:
+- installs distro dependencies (`systemd`, `cron/cronie`, `curl`, `tar`, certificates)
+- installs binaries and service files under `/opt/aurora-linux`
+- installs `/etc/systemd/system/aurora.service`
+- updates Sigma signatures (unless `--skip-signature-update`)
+- enables and starts `aurora`
+
+### Update Utility
+
+`aurora-util` automates update tasks:
+
+```bash
+# Refresh Sigma Linux rules from SigmaHQ releases
+sudo ./aurora-util update-signatures
+
+# Upgrade aurora from Aurora-Linux GitHub releases
+sudo ./aurora-util upgrade-aurora
+```
+
+### Scheduled Maintenance (Cron)
+
+Install nightly maintenance (update signatures + restart service):
+
+```bash
+# From source checkout:
+sudo ./scripts/install-maintenance-cron.sh --schedule "17 3 * * *"
+
+# Or from installed package path:
+sudo /opt/aurora-linux/scripts/install-maintenance-cron.sh --schedule "17 3 * * *"
+```
+
+Enable weekly binary upgrade in the same job:
+
+```bash
+sudo ./scripts/install-maintenance-cron.sh \
+  --schedule "17 3 * * *" \
+  --enable-binary-upgrade
+```
+
+Installed files:
+- `/etc/cron.d/aurora-maintenance`
+- `/opt/aurora-linux/bin/aurora-maintenance.sh`
+- `/var/log/aurora-linux/maintenance.log`
+
+### Config Templates
+
+Templates shipped for operations customization:
+- `/opt/aurora-linux/config/aurora.env.example`
+- `/opt/aurora-linux/deploy/templates/rsyslog-aurora.conf.example`
+- `/opt/aurora-linux/deploy/templates/aurora-maintenance.cron.example`
+
+Use these to tune Aurora flags and set remote log forwarding.
 
 ## Example Output
 
@@ -139,7 +214,9 @@ Aurora Linux follows a **provider → distributor → consumer** pipeline:
 
 ```
 aurora-linux/
-├── cmd/aurora-linux/          CLI entry point (cobra)
+├── cmd/aurora/                CLI entry point (cobra)
+├── cmd/aurora-util/           Release update utility (signatures + binary)
+├── scripts/                   Install + maintenance automation
 ├── lib/
 │   ├── provider/ebpf/         eBPF listener + BPF C programs
 │   ├── provider/replay/       JSONL replay provider (for CI)
@@ -148,7 +225,7 @@ aurora-linux/
 │   ├── consumer/sigma/        Sigma rule evaluation
 │   └── logging/               JSON + text formatters
 ├── resources/log-sources/     Legacy Sigma category→provider mapping files (not currently consumed by runtime)
-├── deploy/                    systemd unit file
+├── deploy/                    systemd + template configs
 └── docs/                      Design plan + developer guide
 ```
 

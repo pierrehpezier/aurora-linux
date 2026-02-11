@@ -1,0 +1,13 @@
+# Example /etc/cron.d/aurora-maintenance file.
+# Runs nightly signature update and restarts aurora on success.
+# Install helper script first:
+#   /opt/aurora-linux/scripts/install-maintenance-cron.sh
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# m h dom mon dow user command
+17 3 * * * root /opt/aurora-linux/bin/aurora-maintenance.sh
+
+# Optional weekly binary upgrade (disabled by default):
+# 30 3 * * 0 root AURORA_MAINT_UPGRADE_BINARY=1 /opt/aurora-linux/bin/aurora-maintenance.sh

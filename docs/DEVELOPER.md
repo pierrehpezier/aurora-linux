@@ -31,13 +31,16 @@ shares **zero code** with it. This is an entirely separate Go codebase.
 
 ```
 aurora-linux/
-├── cmd/aurora-linux/            CLI entry point
+├── cmd/aurora/                  CLI entry point
 │   ├── main.go                  Cobra root command, flag definitions
 │   └── agent/
 │       ├── agent.go             Agent lifecycle: init → collect → shutdown
 │       ├── parameters.go        Configuration struct + defaults
 │       ├── validate.go          Startup parameter validation (user-facing errors)
 │       └── *_test.go            Agent lifecycle + validation tests
+├── cmd/aurora-util/             Update utility (GitHub release fetch/update helpers)
+│   ├── main.go                  Update/install helper commands
+│   └── main_test.go
 ├── lib/
 │   ├── provider/
 │   │   ├── provider.go          EventProvider + Event interfaces
@@ -78,7 +81,13 @@ aurora-linux/
 │   ├── ebpf-log-sources.yml             Service→provider source mapping
 │   └── ebpf-log-source-mappings.yml     Sigma category→service mapping
 ├── deploy/
-│   └── aurora-linux.service     systemd unit file
+│   ├── aurora.service           systemd unit file
+│   ├── aurora.env               default runtime env vars
+│   └── templates/               example env/rsyslog/cron templates
+├── scripts/
+│   ├── build-package.sh         release package assembly
+│   ├── install-service.sh       cross-distro service install script
+│   └── install-maintenance-cron.sh  cron maintenance installer
 ├── docs/
 │   ├── plan_aurora_linux_ebpf_sigma.md  Full technical design document (1900+ lines)
 │   └── DEVELOPER.md             This file
@@ -290,10 +299,11 @@ bpftool btf dump file /sys/kernel/btf/vmlinux format c > lib/provider/ebpf/bpf/v
 go generate ./lib/provider/ebpf/
 
 # Build the binary:
-go build -o aurora-linux ./cmd/aurora-linux/
+go build -o aurora ./cmd/aurora/
+go build -o aurora-util ./cmd/aurora-util/
 
 # Run (requires root or appropriate capabilities):
-sudo ./aurora-linux --rules /path/to/sigma/rules/linux/ --json
+sudo ./aurora --rules /path/to/sigma/rules/linux/ --json
 ```
 
 The `go generate` step produces `*_bpfel.go` and `*_bpfel.o` files. These
@@ -335,7 +345,7 @@ Startup validation fails fast with actionable errors when:
 | `lib/enrichment/correlator_test.go` | `Correlator.Store`+`Lookup`, cache miss, LRU eviction |
 | `lib/consumer/sigma/sigmaconsumer_test.go` | Throttle behavior, invalid-rule-dir behavior, field collision handling, redaction, rule-level lookup benchmark |
 | `lib/logging/textformatter_test.go` | Text formatter escaping of keys/values to prevent log injection |
-| `cmd/aurora-linux/agent/*_test.go` | Startup validation + secure logfile open/close behavior |
+| `cmd/aurora/agent/*_test.go` | Startup validation + secure logfile open/close behavior |
 
 ### Integration tests (NOT YET WRITTEN, require Linux + root)
 
