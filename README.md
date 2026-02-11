@@ -91,6 +91,12 @@ sudo ./aurora --rules /path/to/sigma/rules/linux --json
 with an actionable error if the paths are missing or invalid. Unsupported or
 unmapped rules are skipped; startup only fails when zero rules are loadable.
 
+For more readable terminal output, pretty-print JSON with `jq`:
+
+```bash
+sudo ./aurora --rules ~/sigma/rules/linux/ --json --min-level medium 2>&1 | jq .
+```
+
 ### Deploy as a Service
 
 ```bash
