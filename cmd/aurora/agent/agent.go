@@ -226,7 +226,11 @@ func (a *Agent) reportStats(stop <-chan struct{}, done chan<- struct{}) {
 
 // configureLogging sets up the log formatter and output.
 func (a *Agent) configureLogging() (*log.Logger, error) {
-	log.SetFormatter(&logging.TextFormatter{})
+	if a.params.JSONOutput {
+		log.SetFormatter(&logging.JSONFormatter{})
+	} else {
+		log.SetFormatter(&logging.TextFormatter{})
+	}
 
 	if a.params.Verbose {
 		log.SetLevel(log.DebugLevel)

@@ -124,6 +124,22 @@ func TestConfigureLoggingJSONSplitsDiagnosticsAndNDJSON(t *testing.T) {
 	if strings.Contains(stderrText, `"sigma_rule"`) {
 		t.Fatalf("NDJSON leaked into stderr: %q", stderrText)
 	}
+	if !strings.HasSuffix(stderrText, "\n") {
+		t.Fatalf("stderr diagnostics must be newline-terminated, got %q", stderrText)
+	}
+
+	stderrLines := strings.Split(strings.TrimSpace(stderrText), "\n")
+	if len(stderrLines) != 1 {
+		t.Fatalf("expected one stderr line, got %d lines in %q", len(stderrLines), stderrText)
+	}
+
+	var diagPayload map[string]interface{}
+	if err := json.Unmarshal([]byte(stderrLines[0]), &diagPayload); err != nil {
+		t.Fatalf("stderr line is not valid JSON: %v (line=%q)", err, stderrLines[0])
+	}
+	if got, _ := diagPayload["message"].(string); got != "diagnostic line" {
+		t.Fatalf("stderr JSON message = %q, want diagnostic line", got)
+	}
 
 	if !strings.HasSuffix(stdoutText, "\n") {
 		t.Fatalf("stdout NDJSON must be newline-terminated, got %q", stdoutText)

@@ -33,7 +33,18 @@ jobs:
       - name: Install BPF build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bpftool clang llvm
+          sudo apt-get install -y clang llvm
+          if ! sudo apt-get install -y bpftool; then
+            echo "bpftool package unavailable, falling back to linux-tools-common"
+            sudo apt-get install -y linux-tools-common
+          fi
+          if ! command -v bpftool >/dev/null 2>&1; then
+            BPFTOOL_BIN="$(find /usr/lib/linux-tools -type f -name bpftool 2>/dev/null | head -n 1)"
+            if [[ -n "${BPFTOOL_BIN}" ]]; then
+              sudo ln -sf "${BPFTOOL_BIN}" /usr/local/bin/bpftool
+            fi
+          fi
+          bpftool version
 
       - name: Generate eBPF bindings
         run: |

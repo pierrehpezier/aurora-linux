@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	"github.com/nicholasgasior/aurora-linux/cmd/aurora/agent"
 	"github.com/spf13/cobra"
@@ -49,7 +52,27 @@ matches them against Sigma rules in real time.`,
 	_ = rootCmd.MarkFlagRequired("rules")
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		writeCLIError(err, params.JSONOutput, os.Stderr)
 		os.Exit(1)
 	}
+}
+
+func writeCLIError(err error, jsonOutput bool, out io.Writer) {
+	if err == nil {
+		return
+	}
+
+	if jsonOutput {
+		entry := map[string]string{
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			"level":     "error",
+			"message":   err.Error(),
+		}
+		if encoded, marshalErr := json.Marshal(entry); marshalErr == nil {
+			_, _ = out.Write(append(encoded, '\n'))
+			return
+		}
+	}
+
+	fmt.Fprintln(out, err)
 }
