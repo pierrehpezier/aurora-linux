@@ -58,6 +58,21 @@ func TestValidateParametersRejectsInvalidNumericValues(t *testing.T) {
 	}
 }
 
+func TestValidateParametersRejectsInvalidMinLevel(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.MinLevel = "urgent"
+
+	err := ValidateParameters(params)
+	if err == nil {
+		t.Fatal("ValidateParameters() expected error for invalid --min-level")
+	}
+	if !strings.Contains(err.Error(), "--min-level") {
+		t.Fatalf("expected --min-level context, got %v", err)
+	}
+}
+
 func TestValidateParametersRejectsMissingLogfileDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	params := DefaultParameters()

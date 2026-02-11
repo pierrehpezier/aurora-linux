@@ -26,6 +26,9 @@ type Parameters struct {
 	// ThrottleBurst is the burst size for the per-rule throttle.
 	ThrottleBurst int
 
+	// MinLevel is the minimum Sigma rule level loaded at initialization.
+	MinLevel string
+
 	// Verbose enables debug-level logging.
 	Verbose bool
 
@@ -36,11 +39,12 @@ type Parameters struct {
 // DefaultParameters returns parameters with sensible defaults.
 func DefaultParameters() Parameters {
 	return Parameters{
-		Version:              "dev",
+		Version:              "0.1",
 		RingBufSizePages:     2048, // 8 MB
 		CorrelationCacheSize: 16384,
 		ThrottleRate:         1.0,
 		ThrottleBurst:        5,
+		MinLevel:             "info",
 		StatsInterval:        60,
 	}
 }

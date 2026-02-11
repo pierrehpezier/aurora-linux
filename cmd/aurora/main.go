@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "dev"
+var version = "0.1"
 
 func main() {
 	params := agent.DefaultParameters()
@@ -43,6 +43,7 @@ matches them against Sigma rules in real time.`,
 	flags.IntVar(&params.CorrelationCacheSize, "correlation-cache", params.CorrelationCacheSize, "LRU cache size for parent process correlation")
 	flags.Float64Var(&params.ThrottleRate, "throttle-rate", params.ThrottleRate, "Max Sigma matches per rule per second")
 	flags.IntVar(&params.ThrottleBurst, "throttle-burst", params.ThrottleBurst, "Burst size for per-rule throttle")
+	flags.StringVar(&params.MinLevel, "min-level", params.MinLevel, "Minimum Sigma rule level to load (info, low, medium, high, critical)")
 	flags.BoolVarP(&params.Verbose, "verbose", "v", false, "Enable debug-level logging")
 	flags.IntVar(&params.StatsInterval, "stats-interval", params.StatsInterval, "Stats logging interval in seconds (0=disabled)")
 	_ = rootCmd.MarkFlagRequired("rules")

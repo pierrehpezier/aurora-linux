@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	sigmaconsumer "github.com/nicholasgasior/aurora-linux/lib/consumer/sigma"
 )
 
 // ValidateParameters performs user-facing configuration validation before
@@ -43,6 +45,9 @@ func ValidateParameters(params Parameters) error {
 	}
 	if params.ThrottleRate > 0 && params.ThrottleBurst <= 0 {
 		return fmt.Errorf("--throttle-burst must be > 0 when throttling is enabled, got %d", params.ThrottleBurst)
+	}
+	if !sigmaconsumer.IsValidMinLevel(params.MinLevel) {
+		return fmt.Errorf("--min-level must be one of: info, low, medium, high, critical (got %q)", params.MinLevel)
 	}
 	if params.StatsInterval < 0 {
 		return fmt.Errorf("--stats-interval must be >= 0, got %d", params.StatsInterval)

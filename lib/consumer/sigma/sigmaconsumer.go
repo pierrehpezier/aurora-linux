@@ -20,6 +20,9 @@ type SigmaConsumer struct {
 
 	ruleset    *sigma.Ruleset
 	ruleLevels map[string]string
+	ruleMeta   map[string]ruleMetadata
+	minLevel   string
+	minPrio    int
 
 	// Throttling: per-rule rate limiter to prevent duplicate spam
 	throttles     map[string]*rate.Limiter
@@ -49,6 +52,7 @@ type Config struct {
 	Logger        *log.Logger
 	ThrottleRate  float64 // max matches per rule per second (0 = no throttle)
 	ThrottleBurst int     // burst size for throttle
+	MinLevel      string  // minimum Sigma level to load (info, low, medium, high, critical)
 }
 
 // New creates a new SigmaConsumer.
@@ -60,9 +64,18 @@ func New(cfg Config) *SigmaConsumer {
 		burst = 5
 	}
 
+	minLevel, minPrio, ok := normalizeSigmaLevel(cfg.MinLevel)
+	if !ok {
+		minLevel = normalizedLevelInfo
+		minPrio = levelPriority[minLevel]
+	}
+
 	return &SigmaConsumer{
 		throttles:     make(map[string]*rate.Limiter),
 		ruleLevels:    make(map[string]string),
+		ruleMeta:      make(map[string]ruleMetadata),
+		minLevel:      minLevel,
+		minPrio:       minPrio,
 		throttleOn:    throttleOn,
 		throttleRate:  throttleRate,
 		throttleBurst: burst,
@@ -92,27 +105,41 @@ func (s *SigmaConsumer) InitializeWithRules(ruleDirs []string) error {
 		return fmt.Errorf("creating sigma ruleset: %w", err)
 	}
 
-	s.ruleset = ruleset
+	filteredRules := make([]*sigma.Tree, 0, len(ruleset.Rules))
 	s.ruleLevels = make(map[string]string, len(ruleset.Rules))
+	s.ruleMeta = make(map[string]ruleMetadata, len(ruleset.Rules))
 	for _, tree := range ruleset.Rules {
-		if tree.Rule == nil || tree.Rule.ID == "" {
+		if tree == nil || tree.Rule == nil {
 			continue
 		}
-		s.ruleLevels[tree.Rule.ID] = tree.Rule.Level
-	}
+		if !passesMinLevel(tree.Rule.Level, s.minPrio) {
+			continue
+		}
 
-	if len(ruleDirs) > 0 && ruleset.Ok == 0 {
+		filteredRules = append(filteredRules, tree)
+
+		lookupKey := ruleLookupKey(tree.Rule.ID, tree.Rule.Title)
+		s.ruleLevels[lookupKey] = tree.Rule.Level
+		s.ruleMeta[lookupKey] = buildRuleMetadata(tree)
+	}
+	ruleset.Rules = filteredRules
+	s.ruleset = ruleset
+
+	if len(ruleDirs) > 0 && len(ruleset.Rules) == 0 {
 		return fmt.Errorf(
-			"no loadable Sigma rules found in %v (total=%d failed=%d unsupported=%d)",
-			ruleDirs, ruleset.Total, ruleset.Failed, ruleset.Unsupported,
+			"no loadable Sigma rules found in %v for --min-level=%q (total=%d failed=%d unsupported=%d)",
+			ruleDirs, s.minLevel, ruleset.Total, ruleset.Failed, ruleset.Unsupported,
 		)
 	}
 
 	log.WithFields(log.Fields{
-		"total":       ruleset.Total,
-		"ok":          ruleset.Ok,
-		"failed":      ruleset.Failed,
-		"unsupported": ruleset.Unsupported,
+		"total":        ruleset.Total,
+		"ok":           ruleset.Ok,
+		"loaded":       len(ruleset.Rules),
+		"min_level":    s.minLevel,
+		"failed":       ruleset.Failed,
+		"unsupported":  ruleset.Unsupported,
+		"filtered_out": ruleset.Ok - len(ruleset.Rules),
 	}).Info("Sigma rules loaded")
 
 	return nil
@@ -173,8 +200,8 @@ func (s *SigmaConsumer) allowMatch(ruleID string) bool {
 
 // emitMatch logs a Sigma match.
 func (s *SigmaConsumer) emitMatch(event provider.Event, result sigma.Result) {
-	// Look up the rule level from the ruleset
-	level := s.lookupRuleLevel(result.ID)
+	lookupKey := ruleLookupKey(result.ID, result.Title)
+	level := s.lookupRuleLevel(lookupKey)
 
 	fields := log.Fields{
 		"sigma_rule":  result.ID,
@@ -186,6 +213,8 @@ func (s *SigmaConsumer) emitMatch(event provider.Event, result sigma.Result) {
 	if len(result.Tags) > 0 {
 		fields["sigma_tags"] = result.Tags
 	}
+	s.addRuleMetadataFields(fields, lookupKey)
+	s.addMatchEvidenceFields(fields, lookupKey, event)
 
 	// Add all event data fields
 	event.ForEach(func(key, value string) {

@@ -50,6 +50,7 @@ func (a *Agent) Run() error {
 		"rules":             a.params.RuleDirs,
 		"ringbuf_pages":     a.params.RingBufSizePages,
 		"correlation_cache": a.params.CorrelationCacheSize,
+		"min_level":         a.params.MinLevel,
 	}).Info("Configuration")
 
 	if a.params.RingBufSizePages != DefaultParameters().RingBufSizePages {
@@ -79,6 +80,7 @@ func (a *Agent) Run() error {
 		Logger:        sigmaLogger,
 		ThrottleRate:  a.params.ThrottleRate,
 		ThrottleBurst: a.params.ThrottleBurst,
+		MinLevel:      a.params.MinLevel,
 	})
 
 	if err := a.consumer.Initialize(); err != nil {
@@ -269,7 +271,7 @@ func (a *Agent) printWelcomeBanner() {
 
 	version := strings.TrimSpace(a.params.Version)
 	if version == "" {
-		version = "dev"
+		version = "0.1"
 	}
 	if !strings.HasPrefix(strings.ToLower(version), "v") {
 		version = "v" + version

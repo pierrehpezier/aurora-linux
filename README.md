@@ -66,6 +66,20 @@ go build -o aurora ./cmd/aurora/
 go build -o aurora-util ./cmd/aurora-util/
 ```
 
+Or use Make targets (now synced to `aurora` / `aurora-util` names):
+
+```bash
+make build
+make test
+make vet
+```
+
+Linux note:
+- `make build` now auto-runs eBPF code generation when generated bindings are missing.
+- Required tools on Linux: `bpftool` and `clang`.
+- If you want VCS metadata in binaries, override `BUILDVCS=true`:
+  - `make build BUILDVCS=true`
+
 ### Run
 
 ```bash
@@ -167,6 +181,19 @@ When a Sigma rule matches, Aurora Linux emits a structured alert:
   "sigma_rule": "e2072cab-8c9a-459b-b63c-40ae79e27031",
   "sigma_title": "Decode Base64 Encoded Text",
   "sigma_level": "low",
+  "sigma_match_fields": ["CommandLine", "Image"],
+  "sigma_match_details": {
+    "CommandLine": ["base64 -d"],
+    "Image": ["base64"]
+  },
+  "sigma_match_strings": ["'base64 -d' in CommandLine", "'base64' in Image"],
+  "rule_id": "e2072cab-8c9a-459b-b63c-40ae79e27031",
+  "rule_title": "Decode Base64 Encoded Text",
+  "rule_level": "low",
+  "rule_author": "Florian Roth",
+  "rule_description": "Detects decoding with base64 utility",
+  "rule_references": ["https://github.com/SigmaHQ/sigma"],
+  "rule_path": "/path/to/sigma/rules/linux/process_creation/proc_creation_lnx_base64_decode.yml",
   "Image": "/usr/bin/base64",
   "CommandLine": "base64 -d /tmp/encoded_payload.b64",
   "ParentImage": "/bin/bash",
@@ -187,12 +214,14 @@ When a Sigma rule matches, Aurora Linux emits a structured alert:
 | `--correlation-cache` | 16384 | Parent process LRU cache entries |
 | `--throttle-rate` | 1.0 | Max Sigma matches per rule per second (`0` disables throttling) |
 | `--throttle-burst` | 5 | Burst allowance per rule (used when throttling is enabled) |
+| `--min-level` | info | Load only rules at or above this Sigma level (`info`, `low`, `medium`, `high`, `critical`) |
 | `--stats-interval` | 60 | Stats logging interval (seconds, 0=off) |
 | `-v, --verbose` | off | Debug-level logging |
 
 Operational notes:
 - If `--logfile` is set and cannot be opened safely, startup fails instead of silently falling back to stdout.
 - Text and JSON alert logs preserve reserved Sigma metadata fields and redact common secret/token patterns in logged fields.
+- `--min-level medium` loads only `medium`, `high`, and `critical` rules during startup.
 
 ## Architecture
 

@@ -3,6 +3,7 @@ package sigma
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -60,6 +61,64 @@ func TestInitializeWithRulesFailsWhenNoRulesAreLoadable(t *testing.T) {
 	}
 }
 
+func TestInitializeWithRulesAppliesMinLevelFilter(t *testing.T) {
+	ruleDir := t.TempDir()
+	const lowID = "11111111-1111-1111-1111-111111111111"
+	const highID = "22222222-2222-2222-2222-222222222222"
+
+	writeRuleFile(t, ruleDir, "low.yml", fmt.Sprintf(`title: Low Rule
+id: %s
+status: test
+author: unit
+level: low
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: "/lowbin"
+  condition: selection
+`, lowID))
+	writeRuleFile(t, ruleDir, "high.yml", fmt.Sprintf(`title: High Rule
+id: %s
+status: test
+author: unit
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: "/highbin"
+  condition: selection
+`, highID))
+
+	consumer := New(Config{MinLevel: "medium"})
+	if err := consumer.InitializeWithRules([]string{ruleDir}); err != nil {
+		t.Fatalf("InitializeWithRules() error = %v", err)
+	}
+
+	if got := len(consumer.ruleset.Rules); got != 1 {
+		t.Fatalf("expected 1 loaded rule after --min-level filtering, got %d", got)
+	}
+	if got := consumer.lookupRuleLevel(lowID); got != "" {
+		t.Fatalf("low-level rule should be filtered out, lookupRuleLevel() = %q", got)
+	}
+	if got := consumer.lookupRuleLevel(highID); got != "high" {
+		t.Fatalf("expected high-level rule, got %q", got)
+	}
+
+	results := consumer.EvalFieldsMap(map[string]string{
+		"Image": "/usr/bin/highbin",
+	})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 match after filtering, got %d", len(results))
+	}
+	if results[0].ID != highID {
+		t.Fatalf("expected high rule ID, got %q", results[0].ID)
+	}
+}
+
 func TestEmitMatchDoesNotAllowReservedFieldOverride(t *testing.T) {
 	var out bytes.Buffer
 	logger := log.New()
@@ -107,6 +166,114 @@ func TestEmitMatchDoesNotAllowReservedFieldOverride(t *testing.T) {
 	}
 	if got, _ := logged["CommandLine"].(string); strings.Contains(got, "hunter2") || strings.Contains(got, "abc123") {
 		t.Fatalf("expected command-line secret redaction, got %q", got)
+	}
+}
+
+func TestHandleEventIncludesRuleMetadataAndMatchEvidence(t *testing.T) {
+	ruleDir := t.TempDir()
+	const ruleID = "c248c896-e412-4279-8c15-1c558067b6fa"
+
+	writeRuleFile(t, ruleDir, "whoami_all.yml", fmt.Sprintf(`title: Enumerate All Information With Whoami.EXE
+id: %s
+status: experimental
+description: Detects the execution of "whoami.exe" with the "/all" flag
+author: Unit Tester
+date: 2026-02-01
+modified: 2026-02-02
+references:
+  - https://example.com/reference
+falsepositives:
+  - Unknown
+tags:
+  - attack.discovery
+  - attack.t1033
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: "/whoami"
+    CommandLine|contains: " /all"
+  condition: selection
+`, ruleID))
+
+	var out bytes.Buffer
+	logger := log.New()
+	logger.SetOutput(&out)
+	logger.SetFormatter(&log.JSONFormatter{
+		DisableTimestamp:  true,
+		DisableHTMLEscape: true,
+	})
+
+	consumer := New(Config{
+		Logger:   logger,
+		MinLevel: "info",
+	})
+	if err := consumer.InitializeWithRules([]string{ruleDir}); err != nil {
+		t.Fatalf("InitializeWithRules() error = %v", err)
+	}
+
+	event := &testEvent{
+		ts: time.Unix(1700000000, 0).UTC(),
+		fields: enrichment.DataFieldsMap{
+			"Image":       enrichment.NewStringValue("/usr/bin/whoami"),
+			"CommandLine": enrichment.NewStringValue("whoami /all"),
+			"ProcessId":   enrichment.NewStringValue("1234"),
+		},
+	}
+	if err := consumer.HandleEvent(event); err != nil {
+		t.Fatalf("HandleEvent() error = %v", err)
+	}
+
+	var logged map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &logged); err != nil {
+		t.Fatalf("failed to decode logged JSON: %v", err)
+	}
+
+	if got, _ := logged["rule_author"].(string); got != "Unit Tester" {
+		t.Fatalf("rule_author = %q, want Unit Tester", got)
+	}
+	if got, _ := logged["rule_description"].(string); got == "" {
+		t.Fatal("rule_description should be present")
+	}
+	if got, _ := logged["rule_date"].(string); got != "2026-02-01" {
+		t.Fatalf("rule_date = %q, want 2026-02-01", got)
+	}
+	if got, _ := logged["rule_modified"].(string); got != "2026-02-02" {
+		t.Fatalf("rule_modified = %q, want 2026-02-02", got)
+	}
+	if got, _ := logged["rule_level"].(string); got != "medium" {
+		t.Fatalf("rule_level = %q, want medium", got)
+	}
+
+	gotFields := toStringSetFromAnySlice(logged["sigma_match_fields"])
+	if _, ok := gotFields["CommandLine"]; !ok {
+		t.Fatalf("sigma_match_fields missing CommandLine: %#v", logged["sigma_match_fields"])
+	}
+	if _, ok := gotFields["Image"]; !ok {
+		t.Fatalf("sigma_match_fields missing Image: %#v", logged["sigma_match_fields"])
+	}
+
+	details, ok := logged["sigma_match_details"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("sigma_match_details has unexpected type: %T", logged["sigma_match_details"])
+	}
+	cmdDetails := toStringSetFromAnySlice(details["CommandLine"])
+	if _, ok := cmdDetails[" /all"]; !ok {
+		t.Fatalf("expected CommandLine match detail for ' /all', got %#v", details["CommandLine"])
+	}
+	imageDetails := toStringSetFromAnySlice(details["Image"])
+	if _, ok := imageDetails["/whoami"]; !ok {
+		t.Fatalf("expected Image match detail for '/whoami', got %#v", details["Image"])
+	}
+
+	matchStrings := toStringSetFromAnySlice(logged["sigma_match_strings"])
+	if _, ok := matchStrings["' /all' in CommandLine"]; !ok {
+		t.Fatalf("expected sigma_match_strings to include CommandLine reason, got %#v", logged["sigma_match_strings"])
+	}
+	if _, ok := matchStrings["'/whoami' in Image"]; !ok {
+		t.Fatalf("expected sigma_match_strings to include Image reason, got %#v", logged["sigma_match_strings"])
 	}
 }
 
@@ -165,3 +332,27 @@ func (e *testEvent) Value(fieldname string) enrichment.DataValue {
 	return e.fields.Value(fieldname)
 }
 func (e *testEvent) ForEach(fn func(key string, value string)) { e.fields.ForEach(fn) }
+
+func writeRuleFile(t *testing.T, dir, fileName, content string) {
+	t.Helper()
+	path := filepath.Join(dir, fileName)
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+}
+
+func toStringSetFromAnySlice(value interface{}) map[string]struct{} {
+	out := make(map[string]struct{})
+	slice, ok := value.([]interface{})
+	if !ok {
+		return out
+	}
+	for _, item := range slice {
+		str, ok := item.(string)
+		if !ok {
+			continue
+		}
+		out[str] = struct{}{}
+	}
+	return out
+}
