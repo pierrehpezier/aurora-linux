@@ -1,0 +1,19 @@
+title: eBPF Sources
+backends:
+    - aurora-linux
+logsources:
+    linux-ebpf-process:
+        product: linux
+        service: ebpf-process
+        sources:
+            - "LinuxEBPF:ProcessExec"
+    linux-ebpf-file:
+        product: linux
+        service: ebpf-file
+        sources:
+            - "LinuxEBPF:FileCreate"
+    linux-ebpf-network:
+        product: linux
+        service: ebpf-network
+        sources:
+            - "LinuxEBPF:NetConnect"

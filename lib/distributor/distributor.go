@@ -1,0 +1,107 @@
+package distributor
+
+import (
+	"fmt"
+	"sync"
+
+	"github.com/nicholasgasior/aurora-linux/lib/enrichment"
+	"github.com/nicholasgasior/aurora-linux/lib/provider"
+	log "github.com/sirupsen/logrus"
+)
+
+// EventConsumer processes normalized events after enrichment.
+type EventConsumer interface {
+	Name() string
+	Initialize() error
+	HandleEvent(event provider.Event) error
+	Close() error
+}
+
+// Distributor receives events from providers, applies enrichment, and
+// forwards them to registered consumers.
+type Distributor struct {
+	mu        sync.RWMutex
+	enricher  *enrichment.EventEnricher
+	consumers []EventConsumer
+	correlator *enrichment.Correlator
+
+	processed uint64
+}
+
+// New creates a new Distributor with the given enricher and correlator.
+func New(enricher *enrichment.EventEnricher, correlator *enrichment.Correlator) *Distributor {
+	return &Distributor{
+		enricher:   enricher,
+		correlator: correlator,
+	}
+}
+
+// RegisterConsumer adds a consumer to receive events.
+func (d *Distributor) RegisterConsumer(c EventConsumer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.consumers = append(d.consumers, c)
+}
+
+// HandleEvent is the callback passed to providers. It enriches the event
+// and forwards it to all consumers.
+func (d *Distributor) HandleEvent(event provider.Event) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	// Apply enrichments based on provider + event ID
+	key := enrichmentKey(event.ID())
+	if fields, ok := event.(interface{ Fields() enrichment.DataFieldsMap }); ok {
+		d.enricher.Enrich(key, fields.Fields())
+	}
+
+	// Cache process data for correlation
+	d.cacheProcessData(event)
+
+	// Forward to all consumers
+	for _, c := range d.consumers {
+		if err := c.HandleEvent(event); err != nil {
+			log.WithFields(log.Fields{
+				"consumer": c.Name(),
+				"error":    err,
+			}).Error("Consumer failed to handle event")
+		}
+	}
+
+	d.processed++
+}
+
+// cacheProcessData stores process info for parent correlation on process_creation events.
+func (d *Distributor) cacheProcessData(event provider.Event) {
+	if d.correlator == nil {
+		return
+	}
+
+	// Only cache process_creation events (EventID 1)
+	if event.ID().EventID != 1 {
+		return
+	}
+
+	info := &enrichment.ProcessInfo{
+		PID:              event.Process(),
+		Image:            event.Value("Image").String,
+		CommandLine:      event.Value("CommandLine").String,
+		User:             event.Value("User").String,
+		CurrentDirectory: event.Value("CurrentDirectory").String,
+	}
+	d.correlator.Store(event.Process(), info)
+}
+
+// Processed returns the number of events processed.
+func (d *Distributor) Processed() uint64 {
+	return d.processed
+}
+
+// Correlator returns the correlator for use by enrichment functions.
+func (d *Distributor) Correlator() *enrichment.Correlator {
+	return d.correlator
+}
+
+func enrichmentKey(id provider.EventIdentifier) string {
+	return fmt.Sprintf("%s:%d", id.ProviderName, id.EventID)
+}

@@ -1,0 +1,35 @@
+[Unit]
+Description=Aurora Linux EDR Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/aurora-linux/aurora-linux \
+    --rules /opt/aurora-linux/sigma-rules/ \
+    --log-sources /opt/aurora-linux/log-sources/ \
+    --logfile /var/log/aurora-linux/aurora.log \
+    --json
+Restart=on-failure
+RestartSec=5
+
+# Privileges
+User=root
+# Alternative non-root setup:
+# User=aurora
+# AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE
+# NoNewPrivileges=false
+
+# BPF requires locked memory for maps and ring buffer
+LimitMEMLOCK=infinity
+
+# Resource limits
+CPUQuota=35%
+MemoryMax=512M
+
+# Hardening
+ProtectSystem=strict
+ReadWritePaths=/var/log/aurora-linux /opt/aurora-linux
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

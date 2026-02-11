@@ -1,0 +1,28 @@
+title: eBPF Source Mappings
+backends:
+    - aurora-linux
+logsources:
+    linux_process_creation:
+        category: process_creation
+        product: linux
+        conditions:
+            EventID: 1
+        rewrite:
+            product: linux
+            service: ebpf-process
+    linux_file_event:
+        category: file_event
+        product: linux
+        conditions:
+            EventID: 11
+        rewrite:
+            product: linux
+            service: ebpf-file
+    linux_network_connection:
+        category: network_connection
+        product: linux
+        conditions:
+            EventID: 3
+        rewrite:
+            product: linux
+            service: ebpf-network
