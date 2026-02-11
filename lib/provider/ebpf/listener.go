@@ -56,6 +56,11 @@ type Listener struct {
 	closed    atomic.Bool
 	wg        sync.WaitGroup
 	bootNanos int64 // boot time in nanoseconds (for ktime -> wall clock)
+
+	// Optional init hooks for tests.
+	initExecFn func() error
+	initFileFn func() error
+	initNetFn  func() error
 }
 
 // NewListener creates a new eBPF listener with the given correlator.
@@ -66,7 +71,7 @@ func NewListener(correlator *enrichment.Correlator) *Listener {
 }
 
 func (l *Listener) Name() string        { return ProviderName }
-func (l *Listener) Description() string  { return "eBPF-based telemetry provider for Linux" }
+func (l *Listener) Description() string { return "eBPF-based telemetry provider for Linux" }
 
 // AddSource enables a specific telemetry source.
 func (l *Listener) AddSource(source string) error {
@@ -95,24 +100,76 @@ func (l *Listener) Initialize() error {
 	}
 	l.userCache = uc
 
-	// Load and attach enabled BPF programs
+	// Load and attach enabled BPF programs. A failing source is disabled,
+	// while other sources are still attempted.
+	requested := 0
+	initialized := 0
+	var initErrs []error
+
 	if l.enableExec {
-		if err := l.initExec(); err != nil {
-			return fmt.Errorf("init exec monitor: %w", err)
+		requested++
+		if err := l.initExecSource(); err != nil {
+			l.enableExec = false
+			initErrs = append(initErrs, fmt.Errorf("exec monitor: %w", err))
+			log.WithError(err).Warn("Failed to initialize exec monitor; source disabled")
+		} else {
+			initialized++
 		}
 	}
 	if l.enableFile {
-		if err := l.initFile(); err != nil {
-			return fmt.Errorf("init file monitor: %w", err)
+		requested++
+		if err := l.initFileSource(); err != nil {
+			l.enableFile = false
+			initErrs = append(initErrs, fmt.Errorf("file monitor: %w", err))
+			log.WithError(err).Warn("Failed to initialize file monitor; source disabled")
+		} else {
+			initialized++
 		}
 	}
 	if l.enableNet {
-		if err := l.initNet(); err != nil {
-			return fmt.Errorf("init net monitor: %w", err)
+		requested++
+		if err := l.initNetSource(); err != nil {
+			l.enableNet = false
+			initErrs = append(initErrs, fmt.Errorf("net monitor: %w", err))
+			log.WithError(err).Warn("Failed to initialize net monitor; source disabled")
+		} else {
+			initialized++
 		}
 	}
 
+	if requested > 0 && initialized == 0 {
+		return fmt.Errorf("failed to initialize any eBPF monitor: %w", errors.Join(initErrs...))
+	}
+
+	if requested > initialized {
+		log.WithFields(log.Fields{
+			"requested":   requested,
+			"initialized": initialized,
+		}).Warn("Some eBPF monitors were disabled due to initialization errors")
+	}
+
 	return nil
+}
+
+func (l *Listener) initExecSource() error {
+	if l.initExecFn != nil {
+		return l.initExecFn()
+	}
+	return l.initExec()
+}
+
+func (l *Listener) initFileSource() error {
+	if l.initFileFn != nil {
+		return l.initFileFn()
+	}
+	return l.initFile()
+}
+
+func (l *Listener) initNetSource() error {
+	if l.initNetFn != nil {
+		return l.initNetFn()
+	}
+	return l.initNet()
 }
 
 // initExec loads the exec monitor BPF program and attaches to sched_process_exec.
@@ -121,18 +178,22 @@ func (l *Listener) initExec() error {
 	if err := loadExecMonitorObjects(objs, nil); err != nil {
 		return classifyBPFError(err, "exec_monitor")
 	}
-	l.execObjs = objs
 
 	lnk, err := link.Tracepoint("sched", "sched_process_exec", objs.TraceSchedProcessExec, nil)
 	if err != nil {
+		objs.Close()
 		return fmt.Errorf("attaching sched_process_exec: %w", err)
 	}
-	l.execLink = lnk
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
+		lnk.Close()
+		objs.Close()
 		return fmt.Errorf("creating exec ring buffer reader: %w", err)
 	}
+
+	l.execObjs = objs
+	l.execLink = lnk
 	l.execReader = rd
 
 	return nil
@@ -144,24 +205,31 @@ func (l *Listener) initFile() error {
 	if err := loadFileMonitorObjects(objs, nil); err != nil {
 		return classifyBPFError(err, "file_monitor")
 	}
-	l.fileObjs = objs
 
 	enter, err := link.Tracepoint("syscalls", "sys_enter_openat", objs.TraceSysEnterOpenat, nil)
 	if err != nil {
+		objs.Close()
 		return fmt.Errorf("attaching sys_enter_openat: %w", err)
 	}
-	l.fileEnter = enter
 
 	exit, err := link.Tracepoint("syscalls", "sys_exit_openat", objs.TraceSysExitOpenat, nil)
 	if err != nil {
+		enter.Close()
+		objs.Close()
 		return fmt.Errorf("attaching sys_exit_openat: %w", err)
 	}
-	l.fileExit = exit
 
 	rd, err := ringbuf.NewReader(objs.FileEvents)
 	if err != nil {
+		exit.Close()
+		enter.Close()
+		objs.Close()
 		return fmt.Errorf("creating file ring buffer reader: %w", err)
 	}
+
+	l.fileObjs = objs
+	l.fileEnter = enter
+	l.fileExit = exit
 	l.fileReader = rd
 
 	return nil
@@ -173,18 +241,22 @@ func (l *Listener) initNet() error {
 	if err := loadNetMonitorObjects(objs, nil); err != nil {
 		return classifyBPFError(err, "net_monitor")
 	}
-	l.netObjs = objs
 
 	lnk, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TraceInetSockSetState, nil)
 	if err != nil {
+		objs.Close()
 		return fmt.Errorf("attaching inet_sock_set_state: %w", err)
 	}
-	l.netLink = lnk
 
 	rd, err := ringbuf.NewReader(objs.NetEvents)
 	if err != nil {
+		lnk.Close()
+		objs.Close()
 		return fmt.Errorf("creating net ring buffer reader: %w", err)
 	}
+
+	l.netObjs = objs
+	l.netLink = lnk
 	l.netReader = rd
 
 	return nil
