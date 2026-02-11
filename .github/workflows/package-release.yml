@@ -46,7 +46,7 @@ jobs:
       - name: Install BPF build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm
+          sudo apt-get install -y clang llvm libbpf-dev
           if ! sudo apt-get install -y bpftool; then
             echo "bpftool package unavailable, falling back to linux-tools-common"
             sudo apt-get install -y linux-tools-common
