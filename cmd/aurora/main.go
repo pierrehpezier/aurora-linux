@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/nicholasgasior/aurora-linux/cmd/aurora/agent"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var version = "0.1"
@@ -16,13 +18,12 @@ var version = "0.1"
 func main() {
 	params := agent.DefaultParameters()
 	params.Version = version
+	var configPath string
 
 	rootCmd := &cobra.Command{
 		Use:   "aurora",
 		Short: "Aurora Linux EDR Agent",
-		Long: `Aurora Linux is a standalone Linux EDR agent that collects system
-telemetry via eBPF, normalizes events into a Sigma-compatible schema, and
-matches them against Sigma rules in real time.`,
+		Long:  helpLong(version),
 		Example: `  aurora --rules /opt/sigma/rules/linux --json
   aurora --rules /opt/sigma/rules/linux --rules /opt/custom/sigma --verbose`,
 		Version:       version,
@@ -30,17 +31,41 @@ matches them against Sigma rules in real time.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := agent.ValidateParameters(params); err != nil {
+			cliParams := params
+			effective := cliParams
+
+			if strings.TrimSpace(configPath) != "" {
+				effective = agent.DefaultParameters()
+				effective.Version = version
+
+				if err := agent.ApplyConfigFile(configPath, &effective); err != nil {
+					return err
+				}
+				applyCLIOverrides(cmd.Flags(), &effective, cliParams)
+			}
+			params = effective
+
+			if err := agent.ValidateParameters(effective); err != nil {
 				return err
 			}
-			a := agent.New(params)
+			a := agent.New(effective)
 			return a.Run()
 		},
 	}
 
 	flags := rootCmd.Flags()
+	flags.StringVarP(&configPath, "config", "c", "", "Use parameters from this YAML file")
 	flags.StringSliceVar(&params.RuleDirs, "rules", nil, "Directories containing Sigma YAML rules (repeatable)")
-	flags.StringVar(&params.LogFile, "logfile", "", "Output log file path (default: stdout)")
+	flags.StringVarP(&params.LogFile, "logfile", "l", "", "Path to log file (default: no log file)")
+	flags.StringVar(&params.LogFileFormat, "logfile-format", "", "Format for log file output (syslog or json)")
+	flags.BoolVar(&params.LowPrio, "low-prio", false, "Run Aurora Agent with low process priority")
+	flags.StringVar(&params.ProcessExclude, "process-exclude", "", "Exclude processes that match this string")
+	flags.BoolVar(&params.NoStdout, "no-stdout", false, "Disable logging to standard output")
+	flags.StringVar(&params.TCPFormat, "tcp-format", "", "Format for logs sent via TCP (syslog or json)")
+	flags.StringVar(&params.TCPTarget, "tcp-target", "", "Send logs to this TCP address (host:port)")
+	flags.BoolVar(&params.Trace, "trace", false, "Print tracing information, including observed eBPF events (very verbose)")
+	flags.StringVar(&params.UDPFormat, "udp-format", "", "Format for logs sent via UDP (syslog or json)")
+	flags.StringVar(&params.UDPTarget, "udp-target", "", "Send logs to this UDP address (host:port)")
 	flags.BoolVar(&params.JSONOutput, "json", false, "Enable JSON output format")
 	flags.IntVar(&params.RingBufSizePages, "ringbuf-size", params.RingBufSizePages, "Ring buffer size in pages (must be power of 2; currently informational)")
 	flags.IntVar(&params.CorrelationCacheSize, "correlation-cache", params.CorrelationCacheSize, "LRU cache size for parent process correlation")
@@ -49,12 +74,81 @@ matches them against Sigma rules in real time.`,
 	flags.StringVar(&params.MinLevel, "min-level", params.MinLevel, "Minimum Sigma rule level to load (info, low, medium, high, critical)")
 	flags.BoolVarP(&params.Verbose, "verbose", "v", false, "Enable debug-level logging")
 	flags.IntVar(&params.StatsInterval, "stats-interval", params.StatsInterval, "Stats logging interval in seconds (0=disabled)")
-	_ = rootCmd.MarkFlagRequired("rules")
 
 	if err := rootCmd.Execute(); err != nil {
 		writeCLIError(err, params.JSONOutput, os.Stderr)
 		os.Exit(1)
 	}
+}
+
+func helpLong(version string) string {
+	prettyVersion := strings.TrimSpace(version)
+	if prettyVersion == "" {
+		prettyVersion = "0.1"
+	}
+	if !strings.HasPrefix(strings.ToLower(prettyVersion), "v") {
+		prettyVersion = "v" + prettyVersion
+	}
+
+	lines := []string{
+		"  __    _     ___   ___   ___    __",
+		" / /\\  | | | | |_) / / \\ | |_)  / /\\",
+		"/_/--\\ \\_\\_/ |_| \\ \\_\\_/ |_| \\ /_/--\\",
+		"",
+		"Real-Time Sigma Matching on Linux via eBPF",
+		"",
+		fmt.Sprintf("(c) Florian Roth, 2026, %s", prettyVersion),
+		"",
+		"Aurora Linux is a standalone Linux EDR agent that collects system",
+		"telemetry via eBPF, normalizes events into a Sigma-compatible schema, and",
+		"matches them against Sigma rules in real time.",
+	}
+	return strings.Join(lines, "\n")
+}
+
+func applyCLIOverrides(set *pflag.FlagSet, dst *agent.Parameters, cli agent.Parameters) {
+	set.Visit(func(f *pflag.Flag) {
+		switch f.Name {
+		case "rules":
+			dst.RuleDirs = append([]string(nil), cli.RuleDirs...)
+		case "logfile":
+			dst.LogFile = cli.LogFile
+		case "logfile-format":
+			dst.LogFileFormat = cli.LogFileFormat
+		case "low-prio":
+			dst.LowPrio = cli.LowPrio
+		case "process-exclude":
+			dst.ProcessExclude = cli.ProcessExclude
+		case "no-stdout":
+			dst.NoStdout = cli.NoStdout
+		case "tcp-format":
+			dst.TCPFormat = cli.TCPFormat
+		case "tcp-target":
+			dst.TCPTarget = cli.TCPTarget
+		case "trace":
+			dst.Trace = cli.Trace
+		case "udp-format":
+			dst.UDPFormat = cli.UDPFormat
+		case "udp-target":
+			dst.UDPTarget = cli.UDPTarget
+		case "json":
+			dst.JSONOutput = cli.JSONOutput
+		case "ringbuf-size":
+			dst.RingBufSizePages = cli.RingBufSizePages
+		case "correlation-cache":
+			dst.CorrelationCacheSize = cli.CorrelationCacheSize
+		case "throttle-rate":
+			dst.ThrottleRate = cli.ThrottleRate
+		case "throttle-burst":
+			dst.ThrottleBurst = cli.ThrottleBurst
+		case "min-level":
+			dst.MinLevel = cli.MinLevel
+		case "verbose":
+			dst.Verbose = cli.Verbose
+		case "stats-interval":
+			dst.StatsInterval = cli.StatsInterval
+		}
+	})
 }
 
 func writeCLIError(err error, jsonOutput bool, out io.Writer) {

@@ -312,8 +312,18 @@ should be committed so that subsequent `go build` works without clang.
 ### CLI flags
 
 ```
+-c, --config    YAML config file (CLI flags override config values)
 --rules         Sigma rule directories (repeatable, required)
---logfile       Output log file path (default: stdout)
+-l, --logfile   Output log file path
+--logfile-format Log file format (syslog/json)
+--tcp-target     Forward Sigma matches to TCP host:port
+--tcp-format     TCP format (syslog/json)
+--udp-target     Forward Sigma matches to UDP host:port
+--udp-format     UDP format (syslog/json)
+--no-stdout      Disable Sigma match output to stdout
+--process-exclude Exclude events by process substring match
+--trace          Very-verbose event tracing
+--low-prio       Lower process priority with nice(10)
 --json          JSON output format
 --ringbuf-size  Ring buffer pages (default: 2048 = 8MB, currently informational)
 --correlation-cache  LRU cache entries (default: 16384)
@@ -327,6 +337,8 @@ Startup validation fails fast with actionable errors when:
 - `--rules` is missing, empty, or contains non-directory paths.
 - numeric flags are out of range (e.g., non-power-of-two `--ringbuf-size`).
 - `--logfile` points to a path whose parent directory does not exist.
+- format flags are not `syslog` or `json`.
+- `--tcp-target` / `--udp-target` are not valid `host:port`.
 
 ---
 

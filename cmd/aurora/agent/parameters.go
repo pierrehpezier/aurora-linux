@@ -11,8 +11,35 @@ type Parameters struct {
 	// LogFile is the path to the output log file. Empty means stdout only.
 	LogFile string
 
+	// LogFileFormat controls log file output format (syslog or json).
+	LogFileFormat string
+
 	// JSONOutput enables JSON output format.
 	JSONOutput bool
+
+	// LowPrio lowers process scheduling priority for reduced host impact.
+	LowPrio bool
+
+	// ProcessExclude excludes events whose process fields match this substring.
+	ProcessExclude string
+
+	// NoStdout disables Sigma match logging to standard output.
+	NoStdout bool
+
+	// TCPFormat controls TCP output format (syslog or json).
+	TCPFormat string
+
+	// TCPTarget sends Sigma matches via TCP to host:port.
+	TCPTarget string
+
+	// Trace enables very-verbose event tracing logs.
+	Trace bool
+
+	// UDPFormat controls UDP output format (syslog or json).
+	UDPFormat string
+
+	// UDPTarget sends Sigma matches via UDP to host:port.
+	UDPTarget string
 
 	// RingBufSizePages is the ring buffer size in pages (must be power of 2).
 	RingBufSizePages int

@@ -206,8 +206,18 @@ When a Sigma rule matches, Aurora Linux emits a structured alert:
 
 | Flag | Default | Description |
 |---|---|---|
+| `-c, --config` | off | Load options from a YAML file (CLI flags override config values) |
 | `--rules` | (required) | Sigma rule directories (repeatable, scanned recursively) |
-| `--logfile` | stdout | Output log file path |
+| `-l, --logfile` | off | Output log file path |
+| `--logfile-format` | `syslog` (or `json` when `--json`) | Log file format (`syslog` or `json`) |
+| `--tcp-target` | off | Forward Sigma matches to TCP `host:port` |
+| `--tcp-format` | `syslog` (or `json` when `--json`) | TCP output format (`syslog` or `json`) |
+| `--udp-target` | off | Forward Sigma matches to UDP `host:port` |
+| `--udp-format` | `syslog` (or `json` when `--json`) | UDP output format (`syslog` or `json`) |
+| `--no-stdout` | off | Disable Sigma match output to stdout |
+| `--process-exclude` | off | Exclude events with matching process fields (substring match) |
+| `--trace` | off | Very-verbose event tracing (logs each observed eBPF event) |
+| `--low-prio` | off | Lower process priority via `nice` |
 | `--json` | off | JSON output format |
 | `--ringbuf-size` | 2048 | Ring buffer size in pages (currently informational; runtime tuning planned) |
 | `--correlation-cache` | 16384 | Parent process LRU cache entries |
@@ -218,9 +228,22 @@ When a Sigma rule matches, Aurora Linux emits a structured alert:
 | `-v, --verbose` | off | Debug-level logging |
 
 Operational notes:
-- If `--logfile` is set and cannot be opened safely, startup fails instead of silently falling back to stdout.
+- If `--logfile` is set and cannot be opened safely, startup fails.
+- `--logfile-format`, `--tcp-format`, and `--udp-format` only accept `syslog` or `json`.
+- `--no-stdout` requires at least one enabled sink (`--logfile`, `--tcp-target`, or `--udp-target`).
 - Text and JSON alert logs preserve reserved Sigma metadata fields and redact common secret/token patterns in logged fields.
 - `--min-level medium` loads only `medium`, `high`, and `critical` rules during startup.
+
+Example YAML config:
+
+```yaml
+rules:
+  - /opt/sigma/rules/linux
+logfile: /var/log/aurora-linux/aurora.log
+logfile-format: syslog
+tcp-target: myserver.local:514
+tcp-format: json
+```
 
 ## Architecture
 

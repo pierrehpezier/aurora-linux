@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nicholasgasior/aurora-linux/cmd/aurora/agent"
+	"github.com/spf13/pflag"
 )
 
 func TestWriteCLIErrorJSON(t *testing.T) {
@@ -38,5 +42,41 @@ func TestWriteCLIErrorText(t *testing.T) {
 
 	if got := out.String(); got != "boom\n" {
 		t.Fatalf("text output = %q, want %q", got, "boom\n")
+	}
+}
+
+func TestApplyCLIOverrides(t *testing.T) {
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	var cli agent.Parameters
+	flags.StringSliceVar(&cli.RuleDirs, "rules", nil, "")
+	flags.StringVar(&cli.LogFile, "logfile", "", "")
+	flags.BoolVar(&cli.NoStdout, "no-stdout", false, "")
+	flags.StringVar(&cli.TCPTarget, "tcp-target", "", "")
+
+	if err := flags.Parse([]string{
+		"--rules", "/tmp/cli-rules",
+		"--no-stdout",
+		"--tcp-target", "127.0.0.1:1514",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	dst := agent.DefaultParameters()
+	dst.RuleDirs = []string{filepath.Join("/tmp", "config-rules")}
+	dst.LogFile = "/tmp/from-config.log"
+
+	applyCLIOverrides(flags, &dst, cli)
+
+	if len(dst.RuleDirs) != 1 || dst.RuleDirs[0] != "/tmp/cli-rules" {
+		t.Fatalf("RuleDirs = %#v, want CLI value", dst.RuleDirs)
+	}
+	if !dst.NoStdout {
+		t.Fatal("NoStdout should be overridden from CLI")
+	}
+	if dst.TCPTarget != "127.0.0.1:1514" {
+		t.Fatalf("TCPTarget = %q, want CLI value", dst.TCPTarget)
+	}
+	if dst.LogFile != "/tmp/from-config.log" {
+		t.Fatalf("LogFile should remain config value when CLI flag unchanged, got %q", dst.LogFile)
 	}
 }

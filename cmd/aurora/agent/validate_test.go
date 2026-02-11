@@ -98,3 +98,60 @@ func TestValidateParametersAcceptsValidConfig(t *testing.T) {
 		t.Fatalf("ValidateParameters() unexpected error: %v", err)
 	}
 }
+
+func TestValidateParametersRejectsInvalidOutputFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.LogFileFormat = "plain"
+
+	err := ValidateParameters(params)
+	if err == nil {
+		t.Fatal("ValidateParameters() expected error for invalid --logfile-format")
+	}
+	if !strings.Contains(err.Error(), "--logfile-format") {
+		t.Fatalf("expected --logfile-format context, got %v", err)
+	}
+}
+
+func TestValidateParametersRejectsInvalidTCPTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.TCPTarget = "bad-target"
+
+	err := ValidateParameters(params)
+	if err == nil {
+		t.Fatal("ValidateParameters() expected error for invalid --tcp-target")
+	}
+	if !strings.Contains(err.Error(), "--tcp-target") {
+		t.Fatalf("expected --tcp-target context, got %v", err)
+	}
+}
+
+func TestValidateParametersRejectsNoStdoutWithoutOtherSinks(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.NoStdout = true
+
+	err := ValidateParameters(params)
+	if err == nil {
+		t.Fatal("ValidateParameters() expected error for --no-stdout without alternate sinks")
+	}
+	if !strings.Contains(err.Error(), "--no-stdout") {
+		t.Fatalf("expected --no-stdout context, got %v", err)
+	}
+}
+
+func TestValidateParametersAcceptsNoStdoutWithUDPSink(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.NoStdout = true
+	params.UDPTarget = "127.0.0.1:514"
+
+	if err := ValidateParameters(params); err != nil {
+		t.Fatalf("ValidateParameters() unexpected error: %v", err)
+	}
+}

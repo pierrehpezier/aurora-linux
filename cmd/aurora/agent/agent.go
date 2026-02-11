@@ -14,6 +14,7 @@ import (
 	"github.com/nicholasgasior/aurora-linux/lib/distributor"
 	"github.com/nicholasgasior/aurora-linux/lib/enrichment"
 	"github.com/nicholasgasior/aurora-linux/lib/logging"
+	"github.com/nicholasgasior/aurora-linux/lib/provider"
 	ebpfprovider "github.com/nicholasgasior/aurora-linux/lib/provider/ebpf"
 	log "github.com/sirupsen/logrus"
 )
@@ -29,6 +30,7 @@ type Agent struct {
 	statsStop  chan struct{}
 	statsDone  chan struct{}
 	logFile    *os.File
+	closers    []func() error
 }
 
 // New creates a new agent from the given parameters.
@@ -44,7 +46,15 @@ func (a *Agent) Run() error {
 	if err != nil {
 		return fmt.Errorf("configuring logging: %w", err)
 	}
-	defer a.closeLogFile()
+	defer a.closeOutputs()
+
+	if a.params.LowPrio {
+		if err := syscall.Setpriority(syscall.PRIO_PROCESS, 0, 10); err != nil {
+			log.WithError(err).Warn("Failed to lower process priority; continuing with default priority")
+		} else {
+			log.Info("Process priority lowered")
+		}
+	}
 
 	a.printWelcomeBanner()
 	log.Info("Aurora Linux EDR Agent starting")
@@ -53,6 +63,11 @@ func (a *Agent) Run() error {
 		"ringbuf_pages":     a.params.RingBufSizePages,
 		"correlation_cache": a.params.CorrelationCacheSize,
 		"min_level":         a.params.MinLevel,
+		"process_exclude":   a.params.ProcessExclude,
+		"trace":             a.params.Trace,
+		"no_stdout":         a.params.NoStdout,
+		"tcp_target":        a.params.TCPTarget,
+		"udp_target":        a.params.UDPTarget,
 	}).Info("Configuration")
 
 	if a.params.RingBufSizePages != DefaultParameters().RingBufSizePages {
@@ -124,7 +139,15 @@ func (a *Agent) Run() error {
 	// Start event collection in a goroutine
 	doneCh := make(chan struct{})
 	go func() {
-		a.listener.SendEvents(a.dist.HandleEvent)
+		a.listener.SendEvents(func(event provider.Event) {
+			if a.params.Trace {
+				a.traceEvent(event)
+			}
+			if a.shouldExcludeEvent(event) {
+				return
+			}
+			a.dist.HandleEvent(event)
+		})
 		close(doneCh)
 	}()
 
@@ -226,44 +249,99 @@ func (a *Agent) reportStats(stop <-chan struct{}, done chan<- struct{}) {
 
 // configureLogging sets up the log formatter and output.
 func (a *Agent) configureLogging() (*log.Logger, error) {
+	rollback := true
+	defer func() {
+		if rollback {
+			a.closeOutputs()
+		}
+	}()
+
 	if a.params.JSONOutput {
 		log.SetFormatter(&logging.JSONFormatter{})
 	} else {
 		log.SetFormatter(&logging.TextFormatter{})
 	}
 
-	if a.params.Verbose {
+	if a.params.Verbose || a.params.Trace {
 		log.SetLevel(log.DebugLevel)
 	} else {
 		log.SetLevel(log.InfoLevel)
 	}
+	log.SetOutput(os.Stderr)
 
-	diagnosticOutput := io.Writer(os.Stderr)
+	matchLogger := log.New()
+	matchLogger.SetLevel(log.GetLevel())
+	matchLogger.SetOutput(os.Stdout)
+	if a.params.JSONOutput {
+		matchLogger.SetFormatter(&logging.JSONFormatter{})
+	} else {
+		matchLogger.SetFormatter(&logging.TextFormatter{})
+	}
+	if a.params.NoStdout {
+		matchLogger.SetOutput(io.Discard)
+	}
+
 	if a.params.LogFile != "" {
+		format, err := resolveOutputFormat(a.params.LogFileFormat, a.params.JSONOutput)
+		if err != nil {
+			return nil, err
+		}
+
 		f, err := openSecureLogFile(a.params.LogFile)
 		if err != nil {
 			return nil, err
 		}
 		a.logFile = f
+		matchLogger.AddHook(&formattedOutputHook{
+			formatter: formatterForOutputFormat(format),
+			writer:    f,
+		})
+	}
 
-		if a.params.JSONOutput {
-			// Keep diagnostics visible on stderr while still honoring --logfile.
-			diagnosticOutput = io.MultiWriter(os.Stderr, f)
-		} else {
-			diagnosticOutput = f
+	if a.params.TCPTarget != "" {
+		format, err := resolveOutputFormat(a.params.TCPFormat, a.params.JSONOutput)
+		if err != nil {
+			return nil, err
+		}
+		w, err := newNetworkWriter("tcp", a.params.TCPTarget)
+		if err != nil {
+			return nil, err
+		}
+		a.closers = append(a.closers, w.Close)
+		matchLogger.AddHook(&formattedOutputHook{
+			formatter: formatterForOutputFormat(format),
+			writer:    w,
+		})
+	}
+
+	if a.params.UDPTarget != "" {
+		format, err := resolveOutputFormat(a.params.UDPFormat, a.params.JSONOutput)
+		if err != nil {
+			return nil, err
+		}
+		w, err := newNetworkWriter("udp", a.params.UDPTarget)
+		if err != nil {
+			return nil, err
+		}
+		a.closers = append(a.closers, w.Close)
+		matchLogger.AddHook(&formattedOutputHook{
+			formatter: formatterForOutputFormat(format),
+			writer:    w,
+		})
+	}
+
+	rollback = false
+	return matchLogger, nil
+}
+
+func (a *Agent) closeOutputs() {
+	for i := len(a.closers) - 1; i >= 0; i-- {
+		if err := a.closers[i](); err != nil {
+			log.WithError(err).Warn("Failed to close output sink cleanly")
 		}
 	}
-	log.SetOutput(diagnosticOutput)
-
-	if !a.params.JSONOutput {
-		return log.StandardLogger(), nil
-	}
-
-	matchLogger := log.New()
-	matchLogger.SetLevel(log.GetLevel())
-	matchLogger.SetFormatter(&logging.JSONFormatter{})
-	matchLogger.SetOutput(os.Stdout)
-	return matchLogger, nil
+	a.closers = nil
+	a.closeLogFile()
 }
 
 func (a *Agent) closeLogFile() {
@@ -277,6 +355,54 @@ func (a *Agent) closeLogFile() {
 	if err := f.Close(); err != nil {
 		log.WithError(err).Warn("Failed to close log file cleanly")
 	}
+}
+
+func (a *Agent) shouldExcludeEvent(event provider.Event) bool {
+	filter := strings.ToLower(strings.TrimSpace(a.params.ProcessExclude))
+	if filter == "" {
+		return false
+	}
+
+	fieldsToCheck := []string{
+		"Image",
+		"CommandLine",
+		"ParentImage",
+		"ParentCommandLine",
+	}
+
+	for _, key := range fieldsToCheck {
+		value := event.Value(key)
+		if !value.Valid {
+			continue
+		}
+		if strings.Contains(strings.ToLower(value.String), filter) {
+			if a.params.Trace {
+				log.WithFields(log.Fields{
+					"process_exclude": filter,
+					"matched_field":   key,
+					"matched_value":   value.String,
+					"event_source":    event.Source(),
+				}).Debug("Excluded event due to process filter")
+			}
+			return true
+		}
+	}
+
+	return false
+}
+
+func (a *Agent) traceEvent(event provider.Event) {
+	fields := log.Fields{
+		"event_provider": event.ID().ProviderName,
+		"event_id":       event.ID().EventID,
+		"event_source":   event.Source(),
+		"event_process":  event.Process(),
+		"event_time":     event.Time().UTC().Format(time.RFC3339Nano),
+	}
+	event.ForEach(func(key string, value string) {
+		fields["event_"+key] = value
+	})
+	log.WithFields(fields).Debug("Trace event")
 }
 
 func (a *Agent) printWelcomeBanner() {

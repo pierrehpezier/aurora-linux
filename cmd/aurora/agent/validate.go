@@ -2,8 +2,10 @@ package agent
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	sigmaconsumer "github.com/nicholasgasior/aurora-linux/lib/consumer/sigma"
@@ -63,10 +65,51 @@ func ValidateParameters(params Parameters) error {
 			return fmt.Errorf("logfile directory %q must be a directory", logDir)
 		}
 	}
+	if err := validateConfiguredOutputFormat("--logfile-format", params.LogFileFormat); err != nil {
+		return err
+	}
+	if err := validateConfiguredOutputFormat("--tcp-format", params.TCPFormat); err != nil {
+		return err
+	}
+	if err := validateConfiguredOutputFormat("--udp-format", params.UDPFormat); err != nil {
+		return err
+	}
+	if params.TCPTarget != "" {
+		if err := validateHostPort("--tcp-target", params.TCPTarget); err != nil {
+			return err
+		}
+	}
+	if params.UDPTarget != "" {
+		if err := validateHostPort("--udp-target", params.UDPTarget); err != nil {
+			return err
+		}
+	}
+	if params.NoStdout && params.LogFile == "" && params.TCPTarget == "" && params.UDPTarget == "" {
+		return fmt.Errorf("--no-stdout requires at least one enabled sink: --logfile, --tcp-target, or --udp-target")
+	}
 
 	return nil
 }
 
 func isPowerOfTwo(v int) bool {
 	return v > 0 && (v&(v-1)) == 0
+}
+
+func validateHostPort(flagName string, target string) error {
+	target = strings.TrimSpace(target)
+	host, port, err := net.SplitHostPort(target)
+	if err != nil {
+		return fmt.Errorf("%s must be host:port (got %q): %w", flagName, target, err)
+	}
+	if strings.TrimSpace(host) == "" {
+		return fmt.Errorf("%s must include a host (got %q)", flagName, target)
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("%s must include a numeric port (got %q)", flagName, target)
+	}
+	if portNum < 1 || portNum > 65535 {
+		return fmt.Errorf("%s port must be in range 1-65535 (got %d)", flagName, portNum)
+	}
+	return nil
 }

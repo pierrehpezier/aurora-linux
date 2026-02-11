@@ -8,7 +8,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
+	"github.com/nicholasgasior/aurora-linux/lib/enrichment"
+	"github.com/nicholasgasior/aurora-linux/lib/provider"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -219,3 +222,39 @@ func TestOpenSecureLogFileNoFollowFlagSet(t *testing.T) {
 		t.Fatal("expected O_NOFOLLOW to be non-zero on supported platforms")
 	}
 }
+
+func TestShouldExcludeEventMatchesImageAndCommandLine(t *testing.T) {
+	a := New(Parameters{ProcessExclude: "bash"})
+
+	evt := &stubEvent{
+		id:     provider.EventIdentifier{ProviderName: "LinuxEBPF", EventID: 1},
+		source: "LinuxEBPF:ProcessExec",
+		fields: enrichment.DataFieldsMap{
+			"Image":       enrichment.NewStringValue("/usr/bin/bash"),
+			"CommandLine": enrichment.NewStringValue("bash -c whoami"),
+		},
+	}
+	if !a.shouldExcludeEvent(evt) {
+		t.Fatal("shouldExcludeEvent() expected true for matching process fields")
+	}
+
+	a.params.ProcessExclude = "python"
+	if a.shouldExcludeEvent(evt) {
+		t.Fatal("shouldExcludeEvent() expected false for non-matching filter")
+	}
+}
+
+type stubEvent struct {
+	id     provider.EventIdentifier
+	source string
+	fields enrichment.DataFieldsMap
+}
+
+func (s *stubEvent) ID() provider.EventIdentifier { return s.id }
+func (s *stubEvent) Process() uint32              { return 0 }
+func (s *stubEvent) Source() string               { return s.source }
+func (s *stubEvent) Time() time.Time              { return time.Unix(0, 0) }
+func (s *stubEvent) Value(fieldname string) enrichment.DataValue {
+	return s.fields.Value(fieldname)
+}
+func (s *stubEvent) ForEach(fn func(key string, value string)) { s.fields.ForEach(fn) }
