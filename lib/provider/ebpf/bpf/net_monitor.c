@@ -47,8 +47,20 @@ struct {
 	__type(value, __u64);
 } net_lost_events SEC(".maps");
 
+// PIDs that should be excluded from telemetry (Aurora itself).
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 64);
+	__type(key, __u32);
+	__type(value, __u8);
+} self_pids SEC(".maps");
+
 SEC("tracepoint/sock/inet_sock_set_state")
 int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
+	__u32 pid = bpf_get_current_pid_tgid() >> 32;
+	if (bpf_map_lookup_elem(&self_pids, &pid))
+		return 0;
+
 	int oldstate = BPF_CORE_READ(ctx, oldstate);
 	int newstate = BPF_CORE_READ(ctx, newstate);
 	__u16 family = BPF_CORE_READ(ctx, family);
@@ -77,7 +89,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *ctx) {
 	}
 
 	evt->timestamp_ns = bpf_ktime_get_ns();
-	evt->pid = bpf_get_current_pid_tgid() >> 32;
+	evt->pid = pid;
 	evt->uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
 	evt->family = (__u8)family;
 	evt->sport = sport;

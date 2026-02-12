@@ -39,8 +39,20 @@ struct {
 	__type(value, __u64);
 } lost_events SEC(".maps");
 
+// PIDs that should be excluded from telemetry (Aurora itself).
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 64);
+	__type(key, __u32);
+	__type(value, __u8);
+} self_pids SEC(".maps");
+
 SEC("tracepoint/sched/sched_process_exec")
 int trace_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
+	__u32 pid = bpf_get_current_pid_tgid() >> 32;
+	if (bpf_map_lookup_elem(&self_pids, &pid))
+		return 0;
+
 	struct exec_event *evt;
 
 	// Reserve space in the ring buffer
@@ -58,8 +70,7 @@ int trace_sched_process_exec(struct trace_event_raw_sched_process_exec *ctx) {
 	evt->timestamp_ns = bpf_ktime_get_ns();
 
 	// PID and PPID
-	__u64 pid_tgid = bpf_get_current_pid_tgid();
-	evt->pid = pid_tgid >> 32;
+	evt->pid = pid;
 
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	struct task_struct *parent;

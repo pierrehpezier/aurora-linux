@@ -21,6 +21,7 @@ type execMonitorObjects struct {
 	TraceSchedProcessExec *ciliumebpf.Program
 	Events                *ciliumebpf.Map
 	LostEvents            *ciliumebpf.Map
+	SelfPids              *ciliumebpf.Map
 }
 
 func (o *execMonitorObjects) Close() error { return nil }
@@ -35,6 +36,7 @@ type fileMonitorObjects struct {
 	TraceSysExitOpenat  *ciliumebpf.Program
 	FileEvents          *ciliumebpf.Map
 	FileLostEvents      *ciliumebpf.Map
+	SelfPids            *ciliumebpf.Map
 }
 
 func (o *fileMonitorObjects) Close() error { return nil }
@@ -48,6 +50,7 @@ type netMonitorObjects struct {
 	TraceInetSockSetState *ciliumebpf.Program
 	NetEvents             *ciliumebpf.Map
 	NetLostEvents         *ciliumebpf.Map
+	SelfPids              *ciliumebpf.Map
 }
 
 func (o *netMonitorObjects) Close() error { return nil }

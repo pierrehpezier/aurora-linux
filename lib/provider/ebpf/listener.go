@@ -58,6 +58,7 @@ type Listener struct {
 	closed    atomic.Bool
 	wg        sync.WaitGroup
 	bootNanos int64 // boot time in nanoseconds (for ktime -> wall clock)
+	selfPID   uint32
 
 	// Optional init hooks for tests.
 	initExecFn func() error
@@ -94,6 +95,11 @@ func (l *Listener) AddSource(source string) error {
 func (l *Listener) Initialize() error {
 	// Compute boot time for ktime_get_ns → wall clock conversion
 	l.bootNanos = bootTimeNanos()
+	selfPID := os.Getpid()
+	if selfPID <= 0 {
+		return fmt.Errorf("invalid process id: %d", selfPID)
+	}
+	l.selfPID = uint32(selfPID)
 
 	// Initialize user cache
 	uc, err := NewUserCache(256)
@@ -180,6 +186,10 @@ func (l *Listener) initExec() error {
 	if err := loadExecMonitorObjects(objs, nil); err != nil {
 		return classifyBPFError(err, "exec_monitor")
 	}
+	if err := l.registerSelfPID(objs.SelfPids, "exec"); err != nil {
+		objs.Close()
+		return err
+	}
 
 	lnk, err := link.Tracepoint("sched", "sched_process_exec", objs.TraceSchedProcessExec, nil)
 	if err != nil {
@@ -206,6 +216,10 @@ func (l *Listener) initFile() error {
 	objs := &fileMonitorObjects{}
 	if err := loadFileMonitorObjects(objs, nil); err != nil {
 		return classifyBPFError(err, "file_monitor")
+	}
+	if err := l.registerSelfPID(objs.SelfPids, "file"); err != nil {
+		objs.Close()
+		return err
 	}
 
 	enter, err := link.Tracepoint("syscalls", "sys_enter_openat", objs.TraceSysEnterOpenat, nil)
@@ -243,6 +257,10 @@ func (l *Listener) initNet() error {
 	if err := loadNetMonitorObjects(objs, nil); err != nil {
 		return classifyBPFError(err, "net_monitor")
 	}
+	if err := l.registerSelfPID(objs.SelfPids, "net"); err != nil {
+		objs.Close()
+		return err
+	}
 
 	lnk, err := link.Tracepoint("sock", "inet_sock_set_state", objs.TraceInetSockSetState, nil)
 	if err != nil {
@@ -260,6 +278,19 @@ func (l *Listener) initNet() error {
 	l.netObjs = objs
 	l.netLink = lnk
 	l.netReader = rd
+
+	return nil
+}
+
+func (l *Listener) registerSelfPID(m *ebpf.Map, source string) error {
+	if m == nil {
+		return fmt.Errorf("registering self PID for %s monitor: self_pids map is nil", source)
+	}
+
+	const marker uint8 = 1
+	if err := m.Put(l.selfPID, marker); err != nil {
+		return fmt.Errorf("registering self PID for %s monitor: %w", source, err)
+	}
 
 	return nil
 }

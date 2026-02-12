@@ -55,6 +55,14 @@ struct {
 	__type(value, __u64);
 } file_lost_events SEC(".maps");
 
+// PIDs that should be excluded from telemetry (Aurora itself).
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 64);
+	__type(key, __u32);
+	__type(value, __u8);
+} self_pids SEC(".maps");
+
 // Optional path prefix allowlist. When non-empty, only filenames matching
 // a watched prefix are emitted.
 struct {
@@ -66,14 +74,17 @@ struct {
 
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_sys_enter_openat(struct trace_event_raw_sys_enter *ctx) {
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
+	if (bpf_map_lookup_elem(&self_pids, &pid))
+		return 0;
+
 	// args: dfd(0), filename(1), flags(2), mode(3)
 	int flags = (int)ctx->args[2];
 
 	// Only track opens with O_CREAT
 	if (!(flags & O_CREAT))
 		return 0;
-
-	__u64 pid_tgid = bpf_get_current_pid_tgid();
 
 	struct file_open_args args = {};
 	args.flags = flags;
@@ -94,6 +105,9 @@ int trace_sys_enter_openat(struct trace_event_raw_sys_enter *ctx) {
 SEC("tracepoint/syscalls/sys_exit_openat")
 int trace_sys_exit_openat(struct trace_event_raw_sys_exit *ctx) {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
+	if (bpf_map_lookup_elem(&self_pids, &pid))
+		return 0;
 
 	// Look up stored args from the enter probe
 	struct file_open_args *args = bpf_map_lookup_elem(&openat_args, &pid_tgid);
@@ -119,7 +133,7 @@ int trace_sys_exit_openat(struct trace_event_raw_sys_exit *ctx) {
 	}
 
 	evt->timestamp_ns = bpf_ktime_get_ns();
-	evt->pid = pid_tgid >> 32;
+	evt->pid = pid;
 
 	__u64 uid_gid = bpf_get_current_uid_gid();
 	evt->uid = uid_gid & 0xFFFFFFFF;
