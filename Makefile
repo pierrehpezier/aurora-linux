@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 GO ?= go
-VERSION ?= 0.1.3
+VERSION ?= 0.1.4
 GOOS ?= $(shell $(GO) env GOOS)
 GOARCH ?= $(shell $(GO) env GOARCH)
 HOST_OS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
