@@ -33,7 +33,7 @@ jobs:
       - name: Install BPF build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev
+          sudo apt-get install -y clang llvm libbpf-dev build-essential pkg-config zlib1g-dev
           has_working_bpftool() {
             local output
             [[ -x "${1:-}" ]] || return 1
@@ -91,6 +91,25 @@ jobs:
               fi
               rm -rf "${tmpdir}"
             fi
+          fi
+          if [[ -z "${BPFTOOL_CMD}" ]]; then
+            BPFTOOL_VERSION="v7.6.0"
+            BPFTOOL_SRC_URL="https://github.com/libbpf/bpftool/releases/download/${BPFTOOL_VERSION}/bpftool-libbpf-${BPFTOOL_VERSION}-sources.tar.gz"
+            tmpdir="$(mktemp -d)"
+            if curl -fsSL "${BPFTOOL_SRC_URL}" -o "${tmpdir}/bpftool-src.tgz" && tar -xzf "${tmpdir}/bpftool-src.tgz" -C "${tmpdir}"; then
+              mapfile -t BPFTOOL_BUILD_DIRS < <(find "${tmpdir}" -type f -name Makefile -path '*/src/Makefile' -exec dirname {} \; | sort -u)
+              for build_dir in "${BPFTOOL_BUILD_DIRS[@]}"; do
+                if make -C "${build_dir}" -j"$(nproc)"; then
+                  mapfile -t BPFTOOL_CANDIDATES < <(find "${build_dir}" "${tmpdir}" -type f -name bpftool -perm -111 2>/dev/null | sort -u)
+                  if candidate="$(first_working_bpftool "${BPFTOOL_CANDIDATES[@]}")"; then
+                    sudo install -m 0755 "${candidate}" /usr/local/bin/bpftool-ci
+                    BPFTOOL_CMD="/usr/local/bin/bpftool-ci"
+                    break
+                  fi
+                fi
+              done
+            fi
+            rm -rf "${tmpdir}"
           fi
           if [[ -z "${BPFTOOL_CMD}" ]]; then
             echo "Unable to locate a working bpftool binary"
