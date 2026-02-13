@@ -56,6 +56,25 @@ jobs:
               sudo ln -sf "${BPFTOOL_BIN}" /usr/local/bin/bpftool
             fi
           fi
+          if ! have_bpftool; then
+            case "$(uname -m)" in
+              x86_64|amd64) BPFTOOL_ARCH="amd64" ;;
+              aarch64|arm64) BPFTOOL_ARCH="arm64" ;;
+              *) BPFTOOL_ARCH="" ;;
+            esac
+            if [[ -n "${BPFTOOL_ARCH}" ]]; then
+              BPFTOOL_VERSION="v7.6.0"
+              BPFTOOL_URL="https://github.com/libbpf/bpftool/releases/download/${BPFTOOL_VERSION}/bpftool-${BPFTOOL_VERSION}-${BPFTOOL_ARCH}.tar.gz"
+              tmpdir="$(mktemp -d)"
+              if curl -fsSL "${BPFTOOL_URL}" -o "${tmpdir}/bpftool.tgz" && tar -xzf "${tmpdir}/bpftool.tgz" -C "${tmpdir}"; then
+                BPFTOOL_BIN="$(find "${tmpdir}" -type f -name bpftool | head -n 1)"
+                if [[ -n "${BPFTOOL_BIN}" ]]; then
+                  sudo install -m 0755 "${BPFTOOL_BIN}" /usr/local/bin/bpftool
+                fi
+              fi
+              rm -rf "${tmpdir}"
+            fi
+          fi
           bpftool version
 
       - name: Generate eBPF bindings
