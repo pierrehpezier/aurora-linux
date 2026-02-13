@@ -14,7 +14,7 @@ on:
 jobs:
   package:
     name: Build release package (${{ matrix.goarch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     strategy:
