@@ -54,18 +54,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm libbpf-dev
-          have_bpftool() {
-            command -v bpftool >/dev/null 2>&1 && bpftool version >/dev/null 2>&1
+          has_working_bpftool() {
+            [[ -x "${1:-}" ]] && "${1}" version >/dev/null 2>&1
           }
-          install_working_bpftool() {
+          first_working_bpftool() {
             for candidate in "$@"; do
-              if [[ -x "${candidate}" ]] && "${candidate}" version >/dev/null 2>&1; then
-                sudo install -m 0755 "${candidate}" /usr/local/bin/bpftool
+              if has_working_bpftool "${candidate}"; then
+                echo "${candidate}"
                 return 0
               fi
             done
             return 1
           }
+          BPFTOOL_CMD=""
+          if candidate="$(command -v bpftool 2>/dev/null)" && has_working_bpftool "${candidate}"; then
+            BPFTOOL_CMD="${candidate}"
+          fi
           for pkg in \
             bpftool \
             "linux-tools-$(uname -r)" \
@@ -74,16 +78,16 @@ jobs:
             linux-cloud-tools-azure \
             linux-tools-common
           do
-            if have_bpftool; then
+            if [[ -n "${BPFTOOL_CMD}" ]]; then
               break
             fi
             sudo apt-get install -y "${pkg}" || true
-          done
-          if ! have_bpftool; then
             mapfile -t BPFTOOL_CANDIDATES < <(find /usr -type f -name 'bpftool*' 2>/dev/null | sort -u)
-            install_working_bpftool "${BPFTOOL_CANDIDATES[@]}" || true
-          fi
-          if ! have_bpftool; then
+            if candidate="$(first_working_bpftool "${BPFTOOL_CANDIDATES[@]}")"; then
+              BPFTOOL_CMD="${candidate}"
+            fi
+          done
+          if [[ -z "${BPFTOOL_CMD}" ]]; then
             case "$(uname -m)" in
               x86_64|amd64) BPFTOOL_ARCH="amd64" ;;
               aarch64|arm64) BPFTOOL_ARCH="arm64" ;;
@@ -95,22 +99,27 @@ jobs:
               tmpdir="$(mktemp -d)"
               if curl -fsSL "${BPFTOOL_URL}" -o "${tmpdir}/bpftool.tgz" && tar -xzf "${tmpdir}/bpftool.tgz" -C "${tmpdir}"; then
                 mapfile -t BPFTOOL_CANDIDATES < <(find "${tmpdir}" -type f -perm -111 2>/dev/null | sort -u)
-                install_working_bpftool "${BPFTOOL_CANDIDATES[@]}" || true
+                if candidate="$(first_working_bpftool "${BPFTOOL_CANDIDATES[@]}")"; then
+                  sudo install -m 0755 "${candidate}" /usr/local/bin/bpftool-ci
+                  BPFTOOL_CMD="/usr/local/bin/bpftool-ci"
+                fi
               fi
               rm -rf "${tmpdir}"
             fi
           fi
-          if ! have_bpftool; then
+          if [[ -z "${BPFTOOL_CMD}" ]]; then
             echo "Unable to locate a working bpftool binary"
             command -v bpftool || true
             find /usr -type f -name 'bpftool*' 2>/dev/null | head -n 20 || true
+            exit 1
           fi
-          bpftool version
+          echo "BPFTOOL_CMD=${BPFTOOL_CMD}" >> "${GITHUB_ENV}"
+          "${BPFTOOL_CMD}" version
 
       - name: Generate eBPF bindings
         run: |
           mkdir -p lib/provider/ebpf/bpf/headers
-          bpftool btf dump file /sys/kernel/btf/vmlinux format c > lib/provider/ebpf/bpf/vmlinux.h
+          "${BPFTOOL_CMD:-bpftool}" btf dump file /sys/kernel/btf/vmlinux format c > lib/provider/ebpf/bpf/vmlinux.h
           go generate ./lib/provider/ebpf
 
       - name: Fetch Sigma Linux rules
