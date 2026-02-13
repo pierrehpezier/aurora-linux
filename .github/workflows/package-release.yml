@@ -57,6 +57,15 @@ jobs:
           have_bpftool() {
             command -v bpftool >/dev/null 2>&1 && bpftool version >/dev/null 2>&1
           }
+          install_working_bpftool() {
+            for candidate in "$@"; do
+              if [[ -x "${candidate}" ]] && "${candidate}" version >/dev/null 2>&1; then
+                sudo install -m 0755 "${candidate}" /usr/local/bin/bpftool
+                return 0
+              fi
+            done
+            return 1
+          }
           for pkg in \
             bpftool \
             "linux-tools-$(uname -r)" \
@@ -71,10 +80,8 @@ jobs:
             sudo apt-get install -y "${pkg}" || true
           done
           if ! have_bpftool; then
-            BPFTOOL_BIN="$(find /usr -type f -name bpftool ! -path '/usr/sbin/bpftool' 2>/dev/null | head -n 1)"
-            if [[ -n "${BPFTOOL_BIN}" ]]; then
-              sudo ln -sf "${BPFTOOL_BIN}" /usr/local/bin/bpftool
-            fi
+            mapfile -t BPFTOOL_CANDIDATES < <(find /usr -type f -name 'bpftool*' 2>/dev/null | sort -u)
+            install_working_bpftool "${BPFTOOL_CANDIDATES[@]}" || true
           fi
           if ! have_bpftool; then
             case "$(uname -m)" in
@@ -87,13 +94,16 @@ jobs:
               BPFTOOL_URL="https://github.com/libbpf/bpftool/releases/download/${BPFTOOL_VERSION}/bpftool-${BPFTOOL_VERSION}-${BPFTOOL_ARCH}.tar.gz"
               tmpdir="$(mktemp -d)"
               if curl -fsSL "${BPFTOOL_URL}" -o "${tmpdir}/bpftool.tgz" && tar -xzf "${tmpdir}/bpftool.tgz" -C "${tmpdir}"; then
-                BPFTOOL_BIN="$(find "${tmpdir}" -type f -name bpftool | head -n 1)"
-                if [[ -n "${BPFTOOL_BIN}" ]]; then
-                  sudo install -m 0755 "${BPFTOOL_BIN}" /usr/local/bin/bpftool
-                fi
+                mapfile -t BPFTOOL_CANDIDATES < <(find "${tmpdir}" -type f -perm -111 2>/dev/null | sort -u)
+                install_working_bpftool "${BPFTOOL_CANDIDATES[@]}" || true
               fi
               rm -rf "${tmpdir}"
             fi
+          fi
+          if ! have_bpftool; then
+            echo "Unable to locate a working bpftool binary"
+            command -v bpftool || true
+            find /usr -type f -name 'bpftool*' 2>/dev/null | head -n 20 || true
           fi
           bpftool version
 
