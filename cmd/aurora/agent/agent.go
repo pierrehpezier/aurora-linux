@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nicholasgasior/aurora-linux/lib/consumer/ioc"
 	"github.com/nicholasgasior/aurora-linux/lib/consumer/sigma"
 	"github.com/nicholasgasior/aurora-linux/lib/distributor"
 	"github.com/nicholasgasior/aurora-linux/lib/enrichment"
@@ -30,6 +31,7 @@ type Agent struct {
 	listener   *ebpfprovider.Listener
 	dist       *distributor.Distributor
 	consumer   *sigma.SigmaConsumer
+	ioc        *ioc.Consumer
 	correlator *enrichment.Correlator
 	enricher   *enrichment.EventEnricher
 	statsStop  chan struct{}
@@ -67,6 +69,8 @@ func (a *Agent) Run() error {
 	log.Info("Aurora Linux EDR Agent starting")
 	log.WithFields(log.Fields{
 		"rules":             a.params.RuleDirs,
+		"filename_iocs":     a.params.FilenameIOCPath,
+		"c2_iocs":           a.params.C2IOCPath,
 		"ringbuf_pages":     a.params.RingBufSizePages,
 		"correlation_cache": a.params.CorrelationCacheSize,
 		"min_level":         a.params.MinLevel,
@@ -123,6 +127,18 @@ func (a *Agent) Run() error {
 			return fmt.Errorf("loading Sigma rules: %w", err)
 		}
 	}
+
+	a.ioc = ioc.New(ioc.Config{
+		FilenameIOCPath:     a.params.FilenameIOCPath,
+		C2IOCPath:           a.params.C2IOCPath,
+		FilenameIOCRequired: strings.TrimSpace(a.params.FilenameIOCPath) != "",
+		C2IOCRequired:       strings.TrimSpace(a.params.C2IOCPath) != "",
+		Logger:              sigmaLogger,
+	})
+	if err := a.ioc.Initialize(); err != nil {
+		return fmt.Errorf("initializing IOC consumer: %w", err)
+	}
+	a.dist.RegisterConsumer(a.ioc)
 
 	// Create and initialize eBPF listener
 	a.listener = ebpfprovider.NewListener(a.correlator)
@@ -201,14 +217,22 @@ func (a *Agent) shutdown() {
 			log.WithError(err).Warn("Failed to close Sigma consumer cleanly")
 		}
 	}
+	if a.ioc != nil {
+		if err := a.ioc.Close(); err != nil {
+			log.WithError(err).Warn("Failed to close IOC consumer cleanly")
+		}
+	}
 
-	var processed, matches, lost uint64
+	var processed, sigmaMatches, iocMatches, lost uint64
 	var correlatorLen int
 	if a.dist != nil {
 		processed = a.dist.Processed()
 	}
 	if a.consumer != nil {
-		matches = a.consumer.Matches()
+		sigmaMatches = a.consumer.Matches()
+	}
+	if a.ioc != nil {
+		iocMatches = a.ioc.Matches()
 	}
 	if a.listener != nil {
 		lost = a.listener.LostEvents()
@@ -219,7 +243,8 @@ func (a *Agent) shutdown() {
 
 	log.WithFields(log.Fields{
 		"events_processed": processed,
-		"sigma_matches":    matches,
+		"sigma_matches":    sigmaMatches,
+		"ioc_matches":      iocMatches,
 		"events_lost":      lost,
 		"correlator_size":  correlatorLen,
 	}).Info("Final statistics")
@@ -295,7 +320,11 @@ func (a *Agent) reportStats(stop <-chan struct{}, done chan<- struct{}) {
 
 		lost := a.listener.LostEvents()
 		processed := a.dist.Processed()
-		matches := a.consumer.Matches()
+		sigmaMatches := a.consumer.Matches()
+		iocMatches := uint64(0)
+		if a.ioc != nil {
+			iocMatches = a.ioc.Matches()
+		}
 		correlatorLen := 0
 		if a.correlator != nil {
 			correlatorLen = a.correlator.Len()
@@ -303,7 +332,8 @@ func (a *Agent) reportStats(stop <-chan struct{}, done chan<- struct{}) {
 
 		fields := log.Fields{
 			"events_processed": processed,
-			"sigma_matches":    matches,
+			"sigma_matches":    sigmaMatches,
+			"ioc_matches":      iocMatches,
 			"events_lost":      lost,
 			"correlator_size":  correlatorLen,
 		}

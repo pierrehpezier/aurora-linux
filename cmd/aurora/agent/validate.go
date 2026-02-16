@@ -36,6 +36,17 @@ func ValidateParameters(params Parameters) error {
 		}
 	}
 
+	if strings.TrimSpace(params.FilenameIOCPath) != "" {
+		if err := validateIOCFilePath("--filename-iocs", params.FilenameIOCPath); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(params.C2IOCPath) != "" {
+		if err := validateIOCFilePath("--c2-iocs", params.C2IOCPath); err != nil {
+			return err
+		}
+	}
+
 	if params.RingBufSizePages <= 0 || !isPowerOfTwo(params.RingBufSizePages) {
 		return fmt.Errorf("--ringbuf-size must be a positive power of 2, got %d", params.RingBufSizePages)
 	}
@@ -148,4 +159,16 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func validateIOCFilePath(flagName, path string) error {
+	cleanPath := filepath.Clean(strings.TrimSpace(path))
+	st, err := os.Stat(cleanPath)
+	if err != nil {
+		return fmt.Errorf("%s file %q: %w", flagName, cleanPath, err)
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("%s path %q must be a regular file", flagName, cleanPath)
+	}
+	return nil
 }

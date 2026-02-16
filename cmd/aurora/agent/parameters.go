@@ -8,6 +8,14 @@ type Parameters struct {
 	// RuleDirs contains directories with Sigma YAML rules.
 	RuleDirs []string
 
+	// FilenameIOCPath points to the filename IOC definitions file.
+	// Empty uses the default path near the aurora binary.
+	FilenameIOCPath string
+
+	// C2IOCPath points to the C2 IOC definitions file.
+	// Empty uses the default path near the aurora binary.
+	C2IOCPath string
+
 	// LogFile is the path to the output log file. Empty means stdout only.
 	LogFile string
 
@@ -23,13 +31,13 @@ type Parameters struct {
 	// ProcessExclude excludes events whose process fields match this substring.
 	ProcessExclude string
 
-	// NoStdout disables Sigma match logging to standard output.
+	// NoStdout disables match logging to standard output.
 	NoStdout bool
 
 	// TCPFormat controls TCP output format (syslog or json).
 	TCPFormat string
 
-	// TCPTarget sends Sigma matches via TCP to host:port.
+	// TCPTarget sends match alerts via TCP to host:port.
 	TCPTarget string
 
 	// Trace enables very-verbose event tracing logs.
@@ -38,7 +46,7 @@ type Parameters struct {
 	// UDPFormat controls UDP output format (syslog or json).
 	UDPFormat string
 
-	// UDPTarget sends Sigma matches via UDP to host:port.
+	// UDPTarget sends match alerts via UDP to host:port.
 	UDPTarget string
 
 	// RingBufSizePages is the ring buffer size in pages (must be power of 2).

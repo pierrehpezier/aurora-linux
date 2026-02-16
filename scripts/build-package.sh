@@ -27,6 +27,15 @@ if [[ ! -d "${SIGMA_REPO_DIR}/rules/linux" ]]; then
 	exit 1
 fi
 
+if [[ ! -f "resources/iocs/filename-iocs.txt" ]]; then
+	echo "IOC file not found at resources/iocs/filename-iocs.txt" >&2
+	exit 1
+fi
+if [[ ! -f "resources/iocs/c2-iocs.txt" ]]; then
+	echo "IOC file not found at resources/iocs/c2-iocs.txt" >&2
+	exit 1
+fi
+
 mkdir -p "${DIST_DIR}"
 
 package_root="${DIST_DIR}/${PACKAGE_NAME}"
@@ -36,6 +45,7 @@ mkdir -p \
 	"${package_root}/deploy" \
 	"${package_root}/deploy/templates" \
 	"${package_root}/scripts" \
+	"${package_root}/resources/iocs" \
 	"${package_root}/sigma-rules"
 
 install -m 0755 "${BINARY_PATH}" "${package_root}/aurora"
@@ -49,6 +59,8 @@ install -m 0644 deploy/templates/rsyslog-aurora.conf.example "${package_root}/de
 install -m 0644 deploy/templates/aurora-maintenance.cron.example "${package_root}/deploy/templates/aurora-maintenance.cron.example"
 install -m 0755 scripts/install-service.sh "${package_root}/scripts/install-service.sh"
 install -m 0755 scripts/install-maintenance-cron.sh "${package_root}/scripts/install-maintenance-cron.sh"
+install -m 0644 resources/iocs/filename-iocs.txt "${package_root}/resources/iocs/filename-iocs.txt"
+install -m 0644 resources/iocs/c2-iocs.txt "${package_root}/resources/iocs/c2-iocs.txt"
 cp -a "${SIGMA_REPO_DIR}/rules/linux" "${package_root}/sigma-rules/"
 chmod 0755 "${package_root}/aurora"
 if [[ -f "${package_root}/aurora-util" ]]; then

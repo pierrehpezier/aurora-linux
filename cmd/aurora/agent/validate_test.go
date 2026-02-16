@@ -43,6 +43,57 @@ func TestValidateParametersRejectsRuleFilePath(t *testing.T) {
 	}
 }
 
+func TestValidateParametersRejectsInvalidFilenameIOCPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.FilenameIOCPath = filepath.Join(tmpDir, "missing-filename-iocs.txt")
+
+	err := ValidateParameters(params)
+	if err == nil {
+		t.Fatal("ValidateParameters() expected error for invalid --filename-iocs")
+	}
+	if !strings.Contains(err.Error(), "--filename-iocs") {
+		t.Fatalf("expected --filename-iocs context, got %v", err)
+	}
+}
+
+func TestValidateParametersRejectsInvalidC2IOCPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.C2IOCPath = filepath.Join(tmpDir, "missing-c2-iocs.txt")
+
+	err := ValidateParameters(params)
+	if err == nil {
+		t.Fatal("ValidateParameters() expected error for invalid --c2-iocs")
+	}
+	if !strings.Contains(err.Error(), "--c2-iocs") {
+		t.Fatalf("expected --c2-iocs context, got %v", err)
+	}
+}
+
+func TestValidateParametersAcceptsValidIOCPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	filenameIOCPath := filepath.Join(tmpDir, "filename-iocs.txt")
+	c2IOCPath := filepath.Join(tmpDir, "c2-iocs.txt")
+	if err := os.WriteFile(filenameIOCPath, []byte("foo;80\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(c2IOCPath, []byte("example.com\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	params := DefaultParameters()
+	params.RuleDirs = []string{tmpDir}
+	params.FilenameIOCPath = filenameIOCPath
+	params.C2IOCPath = c2IOCPath
+
+	if err := ValidateParameters(params); err != nil {
+		t.Fatalf("ValidateParameters() unexpected error: %v", err)
+	}
+}
+
 func TestValidateParametersRejectsInvalidNumericValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	params := DefaultParameters()

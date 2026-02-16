@@ -4,7 +4,7 @@
 
 Aurora Linux is a real-time Linux EDR agent.
 
-It attaches eBPF programs to kernel tracepoints, enriches the captured telemetry in user space, and evaluates each event against Sigma rules to emit high-signal alerts in text or JSON. The goal is practical host detection with low overhead and clear, actionable output.
+It attaches eBPF programs to kernel tracepoints, enriches the captured telemetry in user space, and evaluates each event against Sigma rules and IOC feeds to emit high-signal alerts in text or JSON. The goal is practical host detection with low overhead and clear, actionable output.
 
 ```mermaid
 flowchart LR
@@ -107,6 +107,8 @@ sudo systemctl enable aurora
 sudo systemctl start aurora
 ```
 
+Aurora automatically loads bundled IOC files from `resources/iocs/` next to the binary (for packaged installs: `/opt/aurora-linux/resources/iocs/`). Override with `--filename-iocs` and `--c2-iocs` when needed.
+
 ### Automated Install (Recommended)
 
 ```bash
@@ -127,6 +129,7 @@ Supported distro families:
 The installer:
 - installs distro dependencies (`systemd`, `cron/cronie`, `curl`, `tar`, certificates)
 - installs binaries and service files under `/opt/aurora-linux`
+- installs bundled IOC files under `/opt/aurora-linux/resources/iocs`
 - installs `/etc/systemd/system/aurora.service`
 - updates Sigma signatures (unless `--skip-signature-update`)
 - enables and starts `aurora`
@@ -230,13 +233,15 @@ When a Sigma rule matches, Aurora Linux emits a structured alert:
 |---|---|---|
 | `-c, --config` | off | Load options from a YAML file (CLI flags override config values) |
 | `--rules` | (required) | Sigma rule directories (repeatable, scanned recursively) |
+| `--filename-iocs` | `resources/iocs/filename-iocs.txt` near binary | Filename IOC file (`REGEX;SCORE[;FALSE_POSITIVE_REGEX]`) |
+| `--c2-iocs` | `resources/iocs/c2-iocs.txt` near binary | C2 IOC file (domains/IPs, one per line) |
 | `-l, --logfile` | off | Output log file path |
 | `--logfile-format` | `syslog` (or `json` when `--json`) | Log file format (`syslog` or `json`) |
 | `--tcp-target` | off | Forward Sigma matches to TCP `host:port` |
 | `--tcp-format` | `syslog` (or `json` when `--json`) | TCP output format (`syslog` or `json`) |
 | `--udp-target` | off | Forward Sigma matches to UDP `host:port` |
 | `--udp-format` | `syslog` (or `json` when `--json`) | UDP output format (`syslog` or `json`) |
-| `--no-stdout` | off | Disable Sigma match output to stdout |
+| `--no-stdout` | off | Disable match output (Sigma + IOC) to stdout |
 | `--process-exclude` | off | Exclude events with matching process fields (substring match) |
 | `--trace` | off | Very-verbose event tracing (logs each observed eBPF event) |
 | `--low-prio` | off | Lower process priority via `nice` |
@@ -255,6 +260,9 @@ Operational notes:
 - If `--logfile` is set and cannot be opened safely, startup fails.
 - `--logfile-format`, `--tcp-format`, and `--udp-format` only accept `syslog` or `json`.
 - `--no-stdout` requires at least one enabled sink (`--logfile`, `--tcp-target`, or `--udp-target`).
+- IOC parsers skip malformed lines with warnings.
+- If default IOC files are unavailable, Aurora logs a warning and continues without that IOC source.
+- If `--filename-iocs` or `--c2-iocs` is explicitly set and cannot be read, startup fails.
 - Text and JSON alert logs preserve reserved Sigma metadata fields and redact common secret/token patterns in logged fields.
 - `--min-level medium` loads only `medium`, `high`, and `critical` rules during startup.
 - `--sigma-no-collapse-ws` is enabled by default to reduce long-run memory/CPU churn from Sigma whitespace normalization.
@@ -266,6 +274,8 @@ Example YAML config:
 ```yaml
 rules:
   - /opt/sigma/rules/linux
+filename-iocs: /opt/aurora-linux/resources/iocs/filename-iocs.txt
+c2-iocs: /opt/aurora-linux/resources/iocs/c2-iocs.txt
 logfile: /var/log/aurora-linux/aurora.log
 logfile-format: syslog
 tcp-target: myserver.local:514
@@ -281,6 +291,7 @@ Aurora Linux follows a **provider → distributor → consumer** pipeline:
 - **Provider** (`lib/provider/ebpf/`) -- eBPF programs attach to kernel tracepoints and deliver events via ring buffers. A userland listener reconstructs full fields from `/proc/PID/*`.
 - **Distributor** (`lib/distributor/`) -- Applies enrichment functions (parent process correlation via LRU cache, UID→username resolution) and routes events to consumers.
 - **Consumer** (`lib/consumer/sigma/`) -- Evaluates events against loaded Sigma rules using [go-sigma-rule-engine](https://github.com/markuskont/go-sigma-rule-engine). Includes per-rule throttling to suppress duplicate alerts.
+- **Consumer** (`lib/consumer/ioc/`) -- Evaluates events against bundled IOC files (`filename-iocs.txt`, `c2-iocs.txt`) and emits IOC match alerts.
 
 ### Sigma Field Coverage
 
@@ -303,7 +314,9 @@ aurora-linux/
 │   ├── distributor/           Event routing + enrichment
 │   ├── enrichment/            DataFieldsMap, correlator cache
 │   ├── consumer/sigma/        Sigma rule evaluation
+│   ├── consumer/ioc/          IOC evaluation (filename + C2)
 │   └── logging/               JSON + text formatters
+├── resources/iocs/            Bundled IOC files for runtime matching
 ├── resources/log-sources/     Legacy Sigma category→provider mapping files (not consumed by runtime)
 ├── deploy/                    systemd + template configs
 └── docs/                      Design plan + developer guide

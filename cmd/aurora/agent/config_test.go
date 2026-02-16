@@ -12,6 +12,8 @@ func TestApplyConfigFileSetsSupportedFields(t *testing.T) {
 	cfg := `
 rules:
   - /tmp/rules/linux
+filename-iocs: /tmp/filename-iocs.txt
+c2-iocs: /tmp/c2-iocs.txt
 logfile: /tmp/aurora.log
 logfile-format: syslog
 json: true
@@ -44,6 +46,12 @@ pprof-listen: 127.0.0.1:6060
 
 	if len(params.RuleDirs) != 1 || params.RuleDirs[0] != "/tmp/rules/linux" {
 		t.Fatalf("RuleDirs = %#v, want [/tmp/rules/linux]", params.RuleDirs)
+	}
+	if params.FilenameIOCPath != "/tmp/filename-iocs.txt" {
+		t.Fatalf("FilenameIOCPath = %q, want /tmp/filename-iocs.txt", params.FilenameIOCPath)
+	}
+	if params.C2IOCPath != "/tmp/c2-iocs.txt" {
+		t.Fatalf("C2IOCPath = %q, want /tmp/c2-iocs.txt", params.C2IOCPath)
 	}
 	if params.LogFile != "/tmp/aurora.log" || params.LogFileFormat != "syslog" {
 		t.Fatalf("logfile settings not applied: %#v", params)

@@ -49,6 +49,8 @@ func TestApplyCLIOverrides(t *testing.T) {
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	var cli agent.Parameters
 	flags.StringSliceVar(&cli.RuleDirs, "rules", nil, "")
+	flags.StringVar(&cli.FilenameIOCPath, "filename-iocs", "", "")
+	flags.StringVar(&cli.C2IOCPath, "c2-iocs", "", "")
 	flags.StringVar(&cli.LogFile, "logfile", "", "")
 	flags.BoolVar(&cli.NoStdout, "no-stdout", false, "")
 	flags.StringVar(&cli.TCPTarget, "tcp-target", "", "")
@@ -57,6 +59,8 @@ func TestApplyCLIOverrides(t *testing.T) {
 
 	if err := flags.Parse([]string{
 		"--rules", "/tmp/cli-rules",
+		"--filename-iocs", "/tmp/filename-iocs.txt",
+		"--c2-iocs", "/tmp/c2-iocs.txt",
 		"--no-stdout",
 		"--tcp-target", "127.0.0.1:1514",
 		"--sigma-no-collapse-ws",
@@ -76,6 +80,12 @@ func TestApplyCLIOverrides(t *testing.T) {
 	}
 	if !dst.NoStdout {
 		t.Fatal("NoStdout should be overridden from CLI")
+	}
+	if dst.FilenameIOCPath != "/tmp/filename-iocs.txt" {
+		t.Fatalf("FilenameIOCPath = %q, want CLI value", dst.FilenameIOCPath)
+	}
+	if dst.C2IOCPath != "/tmp/c2-iocs.txt" {
+		t.Fatalf("C2IOCPath = %q, want CLI value", dst.C2IOCPath)
 	}
 	if dst.TCPTarget != "127.0.0.1:1514" {
 		t.Fatalf("TCPTarget = %q, want CLI value", dst.TCPTarget)

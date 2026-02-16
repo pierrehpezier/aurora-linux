@@ -56,6 +56,8 @@ func main() {
 	flags := rootCmd.Flags()
 	flags.StringVarP(&configPath, "config", "c", "", "Use parameters from this YAML file")
 	flags.StringSliceVar(&params.RuleDirs, "rules", nil, "Directories containing Sigma YAML rules (repeatable)")
+	flags.StringVar(&params.FilenameIOCPath, "filename-iocs", "", "Path to filename IOC definitions (default: resources/iocs/filename-iocs.txt near the binary)")
+	flags.StringVar(&params.C2IOCPath, "c2-iocs", "", "Path to C2 IOC definitions (default: resources/iocs/c2-iocs.txt near the binary)")
 	flags.StringVarP(&params.LogFile, "logfile", "l", "", "Path to log file (default: no log file)")
 	flags.StringVar(&params.LogFileFormat, "logfile-format", "", "Format for log file output (syslog or json)")
 	flags.BoolVar(&params.LowPrio, "low-prio", false, "Run Aurora Agent with low process priority")
@@ -113,6 +115,10 @@ func applyCLIOverrides(set *pflag.FlagSet, dst *agent.Parameters, cli agent.Para
 		switch f.Name {
 		case "rules":
 			dst.RuleDirs = append([]string(nil), cli.RuleDirs...)
+		case "filename-iocs":
+			dst.FilenameIOCPath = cli.FilenameIOCPath
+		case "c2-iocs":
+			dst.C2IOCPath = cli.C2IOCPath
 		case "logfile":
 			dst.LogFile = cli.LogFile
 		case "logfile-format":

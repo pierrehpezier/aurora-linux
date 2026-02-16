@@ -12,6 +12,8 @@ ENV_SOURCE="${SOURCE_ROOT}/deploy/aurora.env"
 ENV_TEMPLATE_SOURCE="${SOURCE_ROOT}/deploy/templates/aurora.env.example"
 RSYSLOG_TEMPLATE_SOURCE="${SOURCE_ROOT}/deploy/templates/rsyslog-aurora.conf.example"
 CRON_TEMPLATE_SOURCE="${SOURCE_ROOT}/deploy/templates/aurora-maintenance.cron.example"
+FILENAME_IOC_SOURCE="${SOURCE_ROOT}/resources/iocs/filename-iocs.txt"
+C2_IOC_SOURCE="${SOURCE_ROOT}/resources/iocs/c2-iocs.txt"
 RULES_SOURCE_DIR=""
 SKIP_SIGNATURE_UPDATE=0
 FORCE_ENV=0
@@ -173,6 +175,7 @@ install_files() {
 		"${INSTALL_ROOT}/config" \
 		"${INSTALL_ROOT}/deploy/templates" \
 		"${INSTALL_ROOT}/scripts" \
+		"${INSTALL_ROOT}/resources/iocs" \
 		"${INSTALL_ROOT}/sigma-rules/rules" \
 		"${INSTALL_ROOT}/bin" \
 		"/var/log/aurora-linux"
@@ -206,6 +209,16 @@ install_files() {
 
 	install -m 0755 "${SOURCE_ROOT}/scripts/install-service.sh" "${INSTALL_ROOT}/scripts/install-service.sh"
 	install -m 0755 "${SOURCE_ROOT}/scripts/install-maintenance-cron.sh" "${INSTALL_ROOT}/scripts/install-maintenance-cron.sh"
+	if [[ -f "${FILENAME_IOC_SOURCE}" ]]; then
+		install -m 0644 "${FILENAME_IOC_SOURCE}" "${INSTALL_ROOT}/resources/iocs/filename-iocs.txt"
+	else
+		warn "filename IOCs not found at ${FILENAME_IOC_SOURCE}; filename IOC matching may be disabled"
+	fi
+	if [[ -f "${C2_IOC_SOURCE}" ]]; then
+		install -m 0644 "${C2_IOC_SOURCE}" "${INSTALL_ROOT}/resources/iocs/c2-iocs.txt"
+	else
+		warn "C2 IOCs not found at ${C2_IOC_SOURCE}; C2 IOC matching may be disabled"
+	fi
 
 	install -m 0644 "${INSTALL_ROOT}/deploy/aurora.service" "/etc/systemd/system/aurora.service"
 }

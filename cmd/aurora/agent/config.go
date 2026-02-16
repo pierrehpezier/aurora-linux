@@ -11,6 +11,8 @@ import (
 
 type yamlConfig struct {
 	Rules                []string `yaml:"rules"`
+	FilenameIOCPath      *string  `yaml:"filename-iocs"`
+	C2IOCPath            *string  `yaml:"c2-iocs"`
 	LogFile              *string  `yaml:"logfile"`
 	LogFileFormat        *string  `yaml:"logfile-format"`
 	JSONOutput           *bool    `yaml:"json"`
@@ -57,6 +59,12 @@ func ApplyConfigFile(path string, params *Parameters) error {
 
 	if cfg.Rules != nil {
 		params.RuleDirs = append([]string(nil), cfg.Rules...)
+	}
+	if cfg.FilenameIOCPath != nil {
+		params.FilenameIOCPath = strings.TrimSpace(*cfg.FilenameIOCPath)
+	}
+	if cfg.C2IOCPath != nil {
+		params.C2IOCPath = strings.TrimSpace(*cfg.C2IOCPath)
 	}
 	if cfg.LogFile != nil {
 		params.LogFile = strings.TrimSpace(*cfg.LogFile)
