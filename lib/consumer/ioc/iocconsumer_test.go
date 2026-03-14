@@ -196,6 +196,352 @@ func (e *testEvent) Value(fieldname string) enrichment.DataValue {
 }
 func (e *testEvent) ForEach(fn func(key string, value string)) { e.fields.ForEach(fn) }
 
+func TestSanitizeFieldForLoggingRedactsSensitiveKeys(t *testing.T) {
+	sensitiveKeys := []string{
+		"password", "db_password", "ApiPassword",
+		"token", "auth_token", "BearerToken",
+		"secret", "client_secret", "SecretValue",
+		"api_key", "apikey", "MyApiKey",
+		"passwd",
+	}
+	for _, key := range sensitiveKeys {
+		got := sanitizeFieldForLogging(key, "sensitive-value")
+		if got != "[REDACTED]" {
+			t.Fatalf("sanitizeFieldForLogging(%q, ...) = %q, want [REDACTED]", key, got)
+		}
+	}
+}
+
+func TestSanitizeFieldForLoggingPreservesNonSensitive(t *testing.T) {
+	nonSensitive := []struct {
+		key, value string
+	}{
+		{"Image", "/usr/bin/curl"},
+		{"CommandLine", "ls -la"},
+		{"User", "root"},
+		{"ProcessId", "1234"},
+	}
+	for _, tc := range nonSensitive {
+		got := sanitizeFieldForLogging(tc.key, tc.value)
+		if got != tc.value {
+			t.Fatalf("sanitizeFieldForLogging(%q, %q) = %q, want unchanged", tc.key, tc.value, got)
+		}
+	}
+}
+
+func TestSanitizeFieldForLoggingRedactsCommandLineSecrets(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		mustNotExist []string
+		mustExist    []string
+	}{
+		{
+			name:         "flag_password",
+			input:        `curl --password hunter2 http://example.com`,
+			mustNotExist: []string{"hunter2"},
+			mustExist:    []string{"[REDACTED]", "curl", "example.com"},
+		},
+		{
+			name:         "inline_token",
+			input:        `token=abc123def456 cmd`,
+			mustNotExist: []string{"abc123def456"},
+			mustExist:    []string{"[REDACTED]"},
+		},
+		{
+			name:         "multiple_secrets",
+			input:        `app --password s3cr3t --token t0k3n`,
+			mustNotExist: []string{"s3cr3t", "t0k3n"},
+			mustExist:    []string{"[REDACTED]"},
+		},
+		{
+			name:      "no_secrets",
+			input:     `ls -la /tmp`,
+			mustExist: []string{"ls -la /tmp"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sanitizeFieldForLogging("CommandLine", tc.input)
+			for _, blocked := range tc.mustNotExist {
+				if strings.Contains(got, blocked) {
+					t.Fatalf("output %q still contains secret %q", got, blocked)
+				}
+			}
+			for _, required := range tc.mustExist {
+				if !strings.Contains(got, required) {
+					t.Fatalf("output %q missing expected string %q", got, required)
+				}
+			}
+		})
+	}
+}
+
+func TestLogLevelForFilenameScore(t *testing.T) {
+	tests := []struct {
+		score int
+		want  log.Level
+	}{
+		{100, log.ErrorLevel},
+		{95, log.ErrorLevel},
+		{80, log.ErrorLevel},
+		{79, log.WarnLevel},
+		{70, log.WarnLevel},
+		{60, log.WarnLevel},
+		{59, log.InfoLevel},
+		{50, log.InfoLevel},
+		{0, log.InfoLevel},
+		{-1, log.InfoLevel},
+	}
+
+	for _, tc := range tests {
+		got := logLevelForFilenameScore(tc.score)
+		if got != tc.want {
+			t.Fatalf("logLevelForFilenameScore(%d) = %v, want %v", tc.score, got, tc.want)
+		}
+	}
+}
+
+func TestIsLikelyDomainEdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want bool
+	}{
+		{name: "valid", input: "evil.com", want: true},
+		{name: "subdomain", input: "c2.evil.com", want: true},
+		{name: "deeply_nested", input: "a.b.c.d.evil.com", want: true},
+		{name: "with_dash", input: "my-evil-c2.example.com", want: true},
+		{name: "with_numbers", input: "c2-123.evil.com", want: true},
+		{name: "empty", input: "", want: false},
+		{name: "leading_dot", input: ".evil.com", want: false},
+		{name: "trailing_dot", input: "evil.com.", want: false},
+		{name: "double_dot", input: "evil..com", want: false},
+		{name: "no_dot", input: "localhost", want: false},
+		{name: "single_char_tld", input: "a.b", want: true},
+		{name: "uppercase_rejected", input: "Evil.com", want: false},
+		{name: "underscore_rejected", input: "evil_host.com", want: false},
+		{name: "space_rejected", input: "evil .com", want: false},
+		{name: "unicode_rejected", input: "évil.com", want: false},
+		{name: "just_dots", input: "...", want: false},
+		{name: "single_dot", input: ".", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isLikelyDomain(tc.input)
+			if got != tc.want {
+				t.Fatalf("isLikelyDomain(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeIP(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "ipv4", input: "192.168.1.1", want: "192.168.1.1"},
+		{name: "ipv4_whitespace", input: "  10.0.0.1  ", want: "10.0.0.1"},
+		{name: "ipv6_full", input: "2001:0db8:85a3:0000:0000:8a2e:0370:7334", want: "2001:db8:85a3::8a2e:370:7334"},
+		{name: "ipv6_short", input: "::1", want: "::1"},
+		{name: "empty", input: "", want: ""},
+		{name: "invalid", input: "not-an-ip", want: ""},
+		{name: "domain", input: "example.com", want: ""},
+		{name: "partial_ipv4", input: "192.168.1", want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeIP(tc.input)
+			if got != tc.want {
+				t.Fatalf("normalizeIP(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDomain(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Example.COM", "example.com"},
+		{"  evil.COM.  ", "evil.com"},
+		{"already-lower.test", "already-lower.test"},
+		{"", ""},
+		{"  ", ""},
+	}
+
+	for _, tc := range tests {
+		got := normalizeDomain(tc.input)
+		if got != tc.want {
+			t.Fatalf("normalizeDomain(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestLoadFilenameIOCsDuplicateDedup(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "dupes.txt")
+	content := strings.Join([]string{
+		`(?i)/evil\.exe;90`,
+		`(?i)/evil\.exe;90`,
+		`(?i)/evil\.exe;90`,
+		`(?i)/other\.exe;80`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	entries, err := loadFilenameIOCs(path, true)
+	if err != nil {
+		t.Fatalf("loadFilenameIOCs() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries after dedup, got %d", len(entries))
+	}
+}
+
+func TestLoadFilenameIOCsSkipsMalformedLines(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "mixed.txt")
+	content := strings.Join([]string{
+		"# comment line",
+		"",
+		`no-score-field`,
+		`(invalid-regex;90`,
+		`;50`,
+		`valid-pattern;not-a-number`,
+		`(?i)/good\.exe;75`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	entries, err := loadFilenameIOCs(path, true)
+	if err != nil {
+		t.Fatalf("loadFilenameIOCs() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 valid entry, got %d", len(entries))
+	}
+	if entries[0].rawPattern != `(?i)/good\.exe` {
+		t.Fatalf("pattern = %q, want (?i)/good\\.exe", entries[0].rawPattern)
+	}
+	if entries[0].score != 75 {
+		t.Fatalf("score = %d, want 75", entries[0].score)
+	}
+}
+
+func TestLoadFilenameIOCsEmptyPath(t *testing.T) {
+	entries, err := loadFilenameIOCs("", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entries != nil {
+		t.Fatalf("expected nil for empty path, got %v", entries)
+	}
+}
+
+func TestLoadC2IOCsCategorizesCorrectly(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "c2.txt")
+	content := strings.Join([]string{
+		"# C2 indicators",
+		"evil-c2.example.com",
+		"198.51.100.1",
+		"203.0.113.42",
+		"bad.domain.test",
+		"10.0.0.1",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	domains, ips, err := loadC2IOCs(path, true)
+	if err != nil {
+		t.Fatalf("loadC2IOCs() error = %v", err)
+	}
+	if len(domains) != 2 {
+		t.Fatalf("expected 2 domains, got %d: %v", len(domains), domains)
+	}
+	if len(ips) != 3 {
+		t.Fatalf("expected 3 IPs, got %d: %v", len(ips), ips)
+	}
+	if _, ok := domains["evil-c2.example.com"]; !ok {
+		t.Fatal("missing evil-c2.example.com")
+	}
+	if _, ok := ips["198.51.100.1"]; !ok {
+		t.Fatal("missing 198.51.100.1")
+	}
+}
+
+func TestLoadC2IOCsRejectsWhitespacedLines(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "c2.txt")
+	content := "some invalid line with spaces\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	domains, ips, err := loadC2IOCs(path, true)
+	if err != nil {
+		t.Fatalf("loadC2IOCs() error = %v", err)
+	}
+	if len(domains) != 0 || len(ips) != 0 {
+		t.Fatalf("expected 0 entries for whitespace lines, got domains=%d ips=%d", len(domains), len(ips))
+	}
+}
+
+func TestMultipleFilenameIOCMatchesOnSingleEvent(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "filename-iocs.txt")
+	content := strings.Join([]string{
+		`(?i)/tmp/;50`,
+		`(?i)evil;80`,
+		`(?i)\.sh$;70`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	matchLogger, out := testLogger()
+	consumer := New(Config{
+		FilenameIOCPath:     path,
+		FilenameIOCRequired: true,
+		Logger:              matchLogger,
+	})
+	if err := consumer.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	// This event matches ALL THREE patterns.
+	event := &testEvent{
+		id:     provider.EventIdentifier{ProviderName: "LinuxEBPF", EventID: 11},
+		source: "LinuxEBPF:FileCreate",
+		ts:     time.Unix(1700000000, 0).UTC(),
+		fields: enrichment.DataFieldsMap{
+			"TargetFilename": enrichment.NewStringValue("/tmp/evil.sh"),
+		},
+	}
+	if err := consumer.HandleEvent(event); err != nil {
+		t.Fatalf("HandleEvent() error = %v", err)
+	}
+
+	if got := consumer.Matches(); got != 3 {
+		t.Fatalf("Matches() = %d, want 3 (one per matching pattern)", got)
+	}
+
+	lines := decodeJSONLines(t, out)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 IOC alert lines, got %d", len(lines))
+	}
+}
+
 func testLogger() (*log.Logger, *bytes.Buffer) {
 	var out bytes.Buffer
 	logger := log.New()
