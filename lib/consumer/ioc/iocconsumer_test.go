@@ -20,8 +20,8 @@ func TestFilenameIOCFalsePositiveExclusionAndMatch(t *testing.T) {
 	filenameIOCPath := filepath.Join(tmpDir, "filename-iocs.txt")
 	if err := os.WriteFile(filenameIOCPath, []byte(strings.Join([]string{
 		"# comment",
-		`(?i)\\procdump(64)?(a)?\.(exe|zip);50;(?i)(SysInternals\\)`,
-		`(?i)\\evil\.exe;85`,
+		`(?i)/procdump(64)?(a)?\.(exe|zip);50;(?i)(sysinternals/)`,
+		`(?i)/evil\.exe;85`,
 		`invalid-line-without-score`,
 		`(invalid-regex;90`,
 		"",
@@ -44,7 +44,7 @@ func TestFilenameIOCFalsePositiveExclusionAndMatch(t *testing.T) {
 		source: "LinuxEBPF:ProcessExec",
 		ts:     time.Unix(1700000000, 0).UTC(),
 		fields: enrichment.DataFieldsMap{
-			"CommandLine": enrichment.NewStringValue(`C:\Tools\SysInternals\procdump64.exe`),
+			"CommandLine": enrichment.NewStringValue(`/opt/sysinternals/procdump64.exe`),
 		},
 	}
 	if err := consumer.HandleEvent(filteredEvent); err != nil {
@@ -56,7 +56,7 @@ func TestFilenameIOCFalsePositiveExclusionAndMatch(t *testing.T) {
 		source: "LinuxEBPF:FileCreate",
 		ts:     time.Unix(1700000001, 0).UTC(),
 		fields: enrichment.DataFieldsMap{
-			"TargetFilename": enrichment.NewStringValue(`C:\Temp\evil.exe`),
+			"TargetFilename": enrichment.NewStringValue(`/tmp/evil.exe`),
 		},
 	}
 	if err := consumer.HandleEvent(matchedEvent); err != nil {
