@@ -143,10 +143,10 @@ func (a *Agent) Run() error {
 	// Create and initialize eBPF listener
 	a.listener = ebpfprovider.NewListener(a.correlator)
 
-	// Enable all sources
-	a.listener.AddSource(ebpfprovider.SourceProcessExec)
-	a.listener.AddSource(ebpfprovider.SourceFileCreate)
-	a.listener.AddSource(ebpfprovider.SourceNetConnect)
+	// Enable all sources (errors are checked during Initialize)
+	_ = a.listener.AddSource(ebpfprovider.SourceProcessExec)
+	_ = a.listener.AddSource(ebpfprovider.SourceFileCreate)
+	_ = a.listener.AddSource(ebpfprovider.SourceNetConnect)
 
 	if err := a.listener.Initialize(); err != nil {
 		return fmt.Errorf("initializing eBPF listener: %w", err)

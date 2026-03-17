@@ -29,8 +29,6 @@ const (
 
 // Listener implements the EventProvider interface using eBPF tracepoints.
 type Listener struct {
-	mu sync.Mutex
-
 	// Which sources are enabled
 	enableExec bool
 	enableFile bool
