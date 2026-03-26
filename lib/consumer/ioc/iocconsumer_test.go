@@ -920,7 +920,7 @@ func TestLoadFilenameIOCsRejectsMalformedEntries(t *testing.T) {
 		`valid-pattern;not-a-num`,  // non-numeric score
 		`good\.exe;abc;fp-pattern`, // non-numeric score with FP field
 		`ok\.dll;75;(unclosed`,     // valid pattern+score, invalid FP regex
-		`# comment`,
+		"# this is a comment line", // comment lines should be skipped
 		``,
 		`(?i)\\legit\.exe;80`,      // valid entry
 		`(?i)\\tool\.exe;60;(?i)\\Windows\\`, // valid three-field
