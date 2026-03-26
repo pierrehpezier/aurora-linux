@@ -914,13 +914,13 @@ func TestLoadFilenameIOCsRejectsMalformedEntries(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "filename-iocs.txt")
 	content := strings.Join([]string{
-		`no-score-field`,           // missing ;SCORE
-		`(invalid-regex;90`,        // unclosed paren
-		`;50`,                      // empty pattern
-		`valid-pattern;not-a-num`,  // non-numeric score
-		`good\.exe;abc;fp-pattern`, // non-numeric score with FP field
-		`ok\.dll;75;(unclosed`,     // valid pattern+score, invalid FP regex
-		"# this is a comment line", // comment lines should be skipped
+		`no-score-field`,
+		`(invalid-regex;90`,
+		`;50`,
+		`valid-pattern;not-a-num`,
+		`good\.exe;abc;fp-pattern`,
+		`ok\.dll;75;(unclosed`,
+		"# this is a comment line",
 		``,
 		`(?i)\\legit\.exe;80`,      // valid entry
 		`(?i)\\tool\.exe;60;(?i)\\Windows\\`, // valid three-field
