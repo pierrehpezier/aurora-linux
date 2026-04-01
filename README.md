@@ -4,7 +4,7 @@
 
 Aurora Linux is a real-time Linux EDR agent.
 
-It attaches eBPF programs to kernel tracepoints, enriches the captured telemetry in user space, and evaluates each event against Sigma rules and IOC feeds to emit high-signal alerts in text or JSON. The goal is practical host detection with low overhead and clear, actionable output.
+It attaches eBPF programs to kernel tracepoints (process exec, file open, network state changes, and bpf syscalls), enriches the captured telemetry in user space, and evaluates each event against Sigma rules and IOC feeds to emit high-signal alerts in text or JSON. The goal is practical host detection with low overhead and clear, actionable output.
 
 ```mermaid
 flowchart LR
@@ -12,6 +12,7 @@ flowchart LR
     E1["sched_process_exec"]
     E2["sys_enter/sys_exit_openat"]
     E3["inet_sock_set_state"]
+    E4["sys_enter/sys_exit_bpf"]
   end
 
   subgraph USER["User Space"]
@@ -23,6 +24,7 @@ flowchart LR
   E1 --> L
   E2 --> L
   E3 --> L
+  E4 --> L
   L -->|ring buffers| C
   C -->|LRU parent cache| S
   S -->|JSON/text alerts| A["Alert Output"]
@@ -30,13 +32,14 @@ flowchart LR
 
 ## What It Detects
 
-Aurora Linux loads standard [Sigma rules](https://github.com/SigmaHQ/sigma) for Linux and matches them in real time against three event types:
+Aurora Linux loads standard [Sigma rules](https://github.com/SigmaHQ/sigma) for Linux and matches them in real time against four event types:
 
 | Event Type | eBPF Hook | Example Detections |
 |---|---|---|
 | **Process Creation** | `tracepoint/sched/sched_process_exec` | Reverse shells, base64 decode, webshell child processes, suspicious Java children |
 | **File Creation** | `tracepoint/syscalls/sys_{enter,exit}_openat` | Cron persistence, sudoers modification, rootkit lock files, downloads to /tmp |
 | **Network Connection** | `tracepoint/sock/inet_sock_set_state` | Bash reverse shells, malware callback ports, C2 on non-standard ports |
+| **BPF Syscall** | `tracepoint/syscalls/sys_{enter,exit}_bpf` | Unauthorized BPF program loads, rootkit BPF attachment, suspicious BPF map operations |
 
 ## Requirements
 
@@ -300,6 +303,7 @@ Aurora Linux follows a **provider → distributor → consumer** pipeline:
 | `process_creation` | Image, CommandLine, ParentImage, ParentCommandLine, User, LogonId, CurrentDirectory | 119/119 rules (100%) |
 | `file_event` | TargetFilename, Image | 8/8 rules (100%) |
 | `network_connection` | Image, DestinationIp, DestinationPort, Initiated | 2/5 rules (40%) -- remaining 3 need DNS correlation |
+| `bpf_event` | Image, User, ProcessId, BpfCommand, BpfProgramType, BpfProgramId, BpfProgramName, EventID | Sigma rules matching on `bpf()` syscall fields |
 
 ## Project Structure
 
