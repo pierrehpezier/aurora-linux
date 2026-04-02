@@ -4,7 +4,7 @@
 
 Aurora Linux is a real-time Linux EDR agent.
 
-It attaches eBPF programs to kernel tracepoints and ingests Linux audit logs, enriches the captured telemetry in user space, and evaluates each event against Sigma rules and IOC feeds to emit high-signal alerts in text or JSON. The goal is practical host detection with low overhead and clear, actionable output.
+It attaches eBPF programs to kernel tracepoints (process exec, file open, network state changes, bpf syscalls, and file timestamp changes) and ingests Linux audit logs, enriches the captured telemetry in user space, and evaluates each event against Sigma rules and IOC feeds to emit high-signal alerts in text or JSON. The goal is practical host detection with low overhead and clear, actionable output.
 
 ```mermaid
 flowchart LR
@@ -12,7 +12,8 @@ flowchart LR
     E1["sched_process_exec"]
     E2["sys_enter/sys_exit_openat"]
     E3["inet_sock_set_state"]
-    E4["sys_enter/sys_exit_utimensat"]
+    E4["sys_enter/sys_exit_bpf"]
+    E5["sys_enter/sys_exit_utimensat"]
   end
 
   subgraph USER["User Space"]
@@ -26,6 +27,7 @@ flowchart LR
   E2 --> L
   E3 --> L
   E4 --> L
+  E5 --> L
   L -->|ring buffers| C
   AU -->|audit.log tail| C
   C -->|LRU parent cache| S
@@ -326,6 +328,7 @@ Aurora Linux follows a **provider → distributor → consumer** pipeline:
 | `file_event` | TargetFilename, Image, FileAction | 8/8 rules (100%) |
 | `file_create_time` | TargetFilename, Image, NewAccessTime, NewModificationTime | timestomping detection |
 | `network_connection` | Image, DestinationIp, DestinationPort, Initiated | 2/5 rules (40%) -- remaining 3 need DNS correlation |
+| `bpf_event` | Image, User, ProcessId, BpfCommand, BpfProgramType, BpfProgramId, BpfProgramName, EventID | Sigma rules matching on `bpf()` syscall fields |
 
 **Audit provider** (raw audit fields):
 
